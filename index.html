@@ -1,0 +1,3240 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+	<meta charset="UTF-8" />
+	<meta name="viewport" content="width=device-width, initial-scale=1" />
+	<title>전일대비 종목</title>
+	<style>
+		:root {
+			--bg0: #0b1020;
+			--bg1: #0a0f1c;
+			--panel: rgba(18, 24, 40, .78);
+			--border: rgba(255, 255, 255, .10);
+			--text: rgba(240, 244, 255, .92);
+			--muted: rgba(240, 244, 255, .70);
+			--muted2: rgba(240, 244, 255, .55);
+			--hover: rgba(255, 255, 255, .06);
+		}
+		html, body { height: 100%; }
+		body {
+			margin: 0;
+			font-family: system-ui, Segoe UI, Apple SD Gothic Neo, Malgun Gothic, sans-serif;
+			color: var(--text);
+			overflow-x: hidden;
+			padding-top: var(--topHeaderH, 0px);
+			background:
+				radial-gradient(1200px 700px at 18% 8%, rgba(95,123,255,.18), transparent 60%),
+				radial-gradient(900px 600px at 78% 18%, rgba(24,216,255,.10), transparent 55%),
+				radial-gradient(900px 600px at 50% 80%, rgba(148,65,255,.10), transparent 60%),
+				linear-gradient(180deg, var(--bg0), var(--bg1));
+		}
+		* { box-sizing: border-box; }
+		button, input, select { font: inherit; }
+		button { cursor: pointer; }
+		button:disabled, input:disabled, select:disabled { cursor: not-allowed; opacity: 0.65; }
+
+		#topHeader {
+			position: fixed;
+			top: 0;
+			left: 0;
+			right: 0;
+			z-index: 3000;
+			padding: 12px;
+			backdrop-filter: none;
+			background: rgba(11, 16, 32, 1);
+			border-bottom: 1px solid var(--border);
+		}
+		.headerRow {
+			display: flex;
+			gap: 10px;
+			align-items: center;
+			flex-wrap: wrap;
+		}
+		.title { font-weight: 800; letter-spacing: .2px; }
+		.muted { color: var(--muted); }
+
+		.controls {
+			display: flex;
+			gap: 8px;
+			align-items: center;
+			flex-wrap: wrap;
+		}
+		.segment {
+			display: inline-flex;
+			gap: 6px;
+			align-items: center;
+			padding: 6px;
+			border: 1px solid var(--border);
+			background: var(--panel);
+			border-radius: 12px;
+		}
+		.segment input {
+			width: 92px;
+			padding: 6px 8px;
+			border-radius: 10px;
+			border: 1px solid var(--border);
+			background: rgba(0,0,0,.20);
+			color: var(--text);
+		}
+		.segment select {
+			width: 92px;
+			padding: 6px 8px;
+			border-radius: 10px;
+			border: 1px solid var(--border);
+			background: rgba(0,0,0,.20);
+			color: var(--text);
+			color-scheme: dark;
+		}
+		.segment select:focus,
+		.segment select:focus-visible {
+			background: rgba(0,0,0,.20);
+			color: var(--text);
+			border-color: rgba(255, 255, 255, .18);
+			outline: none;
+		}
+		/* 드롭다운 옵션 스타일은 브라우저마다 적용 범위가 다릅니다. (지원되는 경우에만 반영) */
+		.segment select option {
+			background: rgba(11, 16, 32, 1);
+			color: var(--text);
+		}
+		.pill {
+			border: 1px solid var(--border);
+			background: rgba(255,255,255,.08);
+			color: var(--text);
+			padding: 7px 10px;
+			border-radius: 999px;
+		}
+		.pill:hover { background: rgba(255,255,255,.12); }
+		.pill.active { background: rgba(255,255,255,.14); font-weight: 700; }
+
+		#container { padding: 12px; }
+		.panel {
+			border: 1px solid var(--border);
+			background: var(--panel);
+			border-radius: 14px;
+			position: relative;
+			overflow: visible;
+		}
+		.tableWrap { overflow: visible; }
+		.stockTable {
+			width: 100%;
+			border-collapse: separate;
+			border-spacing: 0;
+			min-width: 0;
+			table-layout: fixed;
+		}
+		.stockTable th, .stockTable td {
+			border-bottom: 1px solid rgba(255,255,255,.08);
+			padding: 10px 10px;
+			white-space: nowrap;
+			overflow: hidden;
+			text-overflow: ellipsis;
+		}
+		.stockTable th { text-align: left; }
+		.stockTable th.right { text-align: right; }
+		.stockTable thead th {
+			position: sticky;
+			top: var(--tableHeaderTop, 0px);
+			background: rgba(11, 16, 32, 1);
+			backdrop-filter: none;
+			z-index: 2000;
+			user-select: none;
+		}
+		.stockTable thead th.sortable { cursor: pointer; }
+		.stockTable tbody tr:hover { background: rgba(255,255,255,.04); }
+		.right { text-align: right; }
+		.left { text-align: left; }
+		.code { color: var(--muted2); font-variant-numeric: tabular-nums; }
+		.up { color: rgba(255,120,120,.95); }
+		.down { color: rgba(120,170,255,.95); }
+
+		.modalOverlay {
+			position: fixed;
+			inset: 0;
+			background: rgba(0,0,0,.55);
+			display: none;
+			align-items: center;
+			justify-content: center;
+			z-index: 5000;
+			padding: 16px;
+		}
+		.modalOverlay.open { display: flex; }
+		.modalPanel {
+			width: min(980px, 100%);
+			max-height: min(78vh, 900px);
+			overflow: hidden;
+			border: 1px solid var(--border);
+			background: var(--panel);
+			border-radius: 16px;
+			backdrop-filter: blur(10px);
+		}
+		.modalHeader {
+			display: flex;
+			align-items: center;
+			justify-content: space-between;
+			gap: 12px;
+			padding: 12px 14px;
+			border-bottom: 1px solid rgba(255,255,255,.10);
+		}
+		.modalTitle { font-weight: 800; }
+		.modalBody { padding: 12px 14px; overflow: auto; max-height: calc(78vh - 54px); }
+		.modalHeader .actions { display: flex; gap: 8px; align-items: center; }
+
+		.tabs { display: flex; gap: 8px; }
+		.chartTab {
+			border: 1px solid var(--border);
+			background: rgba(255,255,255,.08);
+			color: var(--text);
+			padding: 7px 10px;
+			border-radius: 999px;
+		}
+		.chartTab:hover { background: rgba(255,255,255,.12); }
+		.chartTab.active { background: rgba(255,255,255,.14); font-weight: 700; }
+
+		.chartImg {
+			width: 100%;
+			height: auto;
+			border-radius: 12px;
+			border: 1px solid rgba(255,255,255,.10);
+			background: rgba(0,0,0,.20);
+		}
+		.modalBody canvas {
+			width: 100% !important;
+			height: 360px !important;
+			max-width: 100%;
+			display: block;
+		}
+
+		.opProfitSection {
+			margin-top: 12px;
+		}
+		.opProfitHeader {
+			display: flex;
+			align-items: center;
+			justify-content: space-between;
+			gap: 10px;
+			margin-bottom: 6px;
+		}
+		.opProfitTable {
+			width: 100%;
+			border-collapse: separate;
+			border-spacing: 0;
+			border: 1px solid var(--border);
+			border-radius: 12px;
+			overflow: hidden;
+			background: rgba(0,0,0,.18);
+		}
+		.favoritesTable {
+			table-layout: fixed;
+		}
+		.favoritesTable th,
+		.favoritesTable td {
+			text-align: left;
+			overflow: hidden;
+			text-overflow: ellipsis;
+		}
+		.opProfitTable th, .opProfitTable td {
+			padding: 9px 10px;
+			border-bottom: 1px solid rgba(255,255,255,.08);
+			white-space: nowrap;
+			font-variant-numeric: tabular-nums;
+		}
+		.opProfitTable tr:last-child th, .opProfitTable tr:last-child td { border-bottom: none; }
+		.opProfitTable th { text-align: left; color: var(--muted); font-weight: 700; }
+		.opProfitTable td { text-align: right; }
+
+		.link { color: rgba(240,244,255,.85); text-decoration: none; }
+		.link:hover { text-decoration: underline; }
+
+		.formRow { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+		.inputFile {
+			border: 1px solid var(--border);
+			background: rgba(0,0,0,.20);
+			color: var(--text);
+			padding: 8px 10px;
+			border-radius: 10px;
+			max-width: 100%;
+		}
+
+		.stockPick {
+			display: inline-flex;
+			align-items: flex-start;
+			gap: 8px;
+			max-width: 100%;
+		}
+		.stockCheckbox {
+			flex: 0 0 auto;
+			width: 14px;
+			height: 14px;
+		}
+		.stockNameText {
+			min-width: 0;
+			overflow: visible;
+			text-overflow: clip;
+			white-space: normal;
+			word-break: break-word;
+			overflow-wrap: anywhere;
+		}
+
+		/* Show full stock name (1st column) */
+		#stockTable th:first-child,
+		#stockTable td:first-child {
+			white-space: normal;
+			overflow: visible;
+			text-overflow: clip;
+		}
+
+		/* Favorites modal table should look like main table */
+		.favoritesTableWrap {
+			border: 1px solid var(--border);
+			border-radius: 12px;
+			overflow: hidden;
+			background: rgba(0,0,0,.18);
+		}
+		.favoritesStockTable thead th {
+			background: rgba(11, 16, 32, 1);
+			position: static;
+			top: auto;
+			z-index: auto;
+		}
+		.favoritesStockTable th:first-child,
+		.favoritesStockTable td:first-child {
+			white-space: normal;
+			overflow: visible;
+			text-overflow: clip;
+		}
+
+		/* Sector modal */
+		.sectorGrid {
+			display: grid;
+			grid-template-columns: repeat(3, minmax(0, 1fr));
+			gap: 12px;
+		}
+		@media (max-width: 860px) {
+			.sectorGrid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+		}
+		@media (max-width: 520px) {
+			.sectorGrid { grid-template-columns: 1fr; }
+		}
+		.sectorCard {
+			border: 1px solid var(--border);
+			background: rgba(0,0,0,.18);
+			border-radius: 14px;
+			padding: 14px 14px;
+			text-align: left;
+			color: var(--text);
+		}
+		.sectorCard:hover { background: rgba(255,255,255,.06); }
+		.sectorTitle { font-weight: 800; }
+		.sectorDesc { margin-top: 6px; color: var(--muted); font-size: 12px; }
+	</style>
+	<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+	<script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+</head>
+
+<body>
+	<div id="topHeader">
+		<div class="headerRow">
+			<div class="title" id="rangeTitle">전일대비 종목</div>
+			<div class="muted" id="status">-</div>
+			<button class="pill" id="saveBtn" data-busy-disable="1">저장</button>
+			<button class="pill" id="basketBtn" data-busy-disable="1">basket</button>
+			<input id="displayLimitInput" data-busy-disable="1" placeholder="종목수" value="300" style="width:84px" inputmode="numeric" />
+			<button class="pill" id="displayLimitSearchBtn" data-busy-disable="1">검색</button>
+		</div>
+		<div class="headerRow" style="margin-top:10px">
+			<div class="controls">
+				<div class="segment">
+					<span class="muted">범위</span>
+					<select id="minPctInput" data-busy-disable="1" aria-label="최소 등락률(%)"></select>
+					<span class="muted">~</span>
+					<select id="maxPctInput" data-busy-disable="1" aria-label="최대 등락률(%)"></select>
+					<button class="pill" id="applyRangeBtn" data-busy-disable="1">적용</button>
+				</div>
+				<div class="segment">
+					<button class="pill" id="marketKospiBtn" data-busy-disable="1">코스피</button>
+					<button class="pill" id="marketKosdaqBtn" data-busy-disable="1">코스닥</button>
+					<button class="pill active" id="marketAllBtn" data-busy-disable="1">모두</button>
+					<button class="pill" id="usCpiBtn" data-busy-disable="1">미국CPI</button>
+					<button class="pill" id="usRateBtn" data-busy-disable="1">미국기준금리</button>
+					<button class="pill" id="vixBtn" data-busy-disable="1">빅스지수</button>
+				</div>
+				<div class="segment">
+					<input id="stockSearchInput" data-busy-disable="1" placeholder="종목명/코드 검색" style="width:220px" />
+					<button class="pill" id="stockSearchBtn" data-busy-disable="1">검색</button>
+					<button class="pill" id="favoritesBtn" data-busy-disable="1">관심종목</button>
+					<button class="pill" id="sectorBtn" data-busy-disable="1">섹터종목</button>
+				</div>
+				<div class="segment">
+					<span class="muted">예치금</span>
+					<span id="marketDepositText">-</span>
+				</div>
+				<div class="segment">
+					<span class="muted">오일(WTI)</span>
+					<span id="oilWtiText">-</span>
+				</div>
+				<div class="segment">
+					<span class="muted">나스닥 선물</span>
+					<span id="usFuturesNqText">-</span>
+				</div>
+				<div class="segment">
+					<span class="muted">S&P 500 선물</span>
+					<span id="usFuturesEsText">-</span>
+				</div>
+				<div class="segment">
+					<span class="muted">미국 10년 국채</span>
+					<span id="us10yText">-</span>
+				</div>
+				<div class="segment">
+					<span class="muted">미국달러 인덱스</span>
+					<span id="usdIndexText">-</span>
+				</div>
+				<div class="segment">
+					<span class="muted">코스피200 야간선물</span>
+					<span id="kospi200NightFuturesText">-</span>
+				</div>
+				<div class="segment">
+					<span class="muted">공포탐욕지수</span>
+					<span id="fearGreedText">-</span>
+				</div>
+				<div class="segment">
+					<span class="muted">베이시스</span>
+					<span id="basisText">-</span>
+				</div>
+			</div>
+		</div>
+	</div>
+
+	<div id="container">
+		<div class="panel">
+			<div class="tableWrap">
+				<table id="stockTable" class="stockTable">
+					<thead>
+						<tr>
+							<th class="sortable" data-sort-key="name">종목</th>
+							<th class="sortable" data-sort-key="code">코드</th>
+							<th class="sortable right" data-sort-key="price">현재가</th>
+							<th class="sortable right" data-sort-key="changePct">등락률</th>
+							<th class="sortable right" data-sort-key="rsi14">RSI(50~60)</th>
+							<th class="sortable right" data-sort-key="sidewaysScore">횡보</th>
+								<th class="sortable right" data-sort-key="disparity5Pct">5일 이격도</th>
+							<th class="sortable right" data-sort-key="frgn_net_qty">외국인 수급</th>
+							<th class="sortable right" data-sort-key="current_per">PER배수</th>
+							<th class="sortable right" data-sort-key="target_prc">목표가(PER)</th>
+							<th class="sortable right" data-sort-key="kb_tp">KB</th>
+							<th class="sortable right" data-sort-key="nh_tp">NH</th>
+							<th class="sortable right" data-sort-key="kis_tp">KIS</th>
+						</tr>
+					</thead>
+					<tbody></tbody>
+				</table>
+			</div>
+		</div>
+	</div>
+
+	<!-- US CPI Modal -->
+	<div id="usCpiModalOverlay" class="modalOverlay" aria-hidden="true">
+		<div id="usCpiModalPanel" class="modalPanel" role="dialog" aria-modal="true">
+			<div class="modalHeader">
+				<div class="modalTitle">미국 CPI (최근 1년 YoY%)</div>
+				<div class="actions">
+					<button class="pill" id="usCpiModalCloseBtn">닫기</button>
+				</div>
+			</div>
+			<div class="modalBody">
+				<canvas id="usCpiChart" height="360"></canvas>
+				<div class="muted" id="usCpiHint" style="margin-top:10px"></div>
+			</div>
+		</div>
+	</div>
+
+	<!-- US Rate Modal -->
+	<div id="usRateModalOverlay" class="modalOverlay" aria-hidden="true">
+		<div id="usRateModalPanel" class="modalPanel" role="dialog" aria-modal="true">
+			<div class="modalHeader">
+				<div class="modalTitle">미국 기준금리 (최근 1년)</div>
+				<div class="actions">
+					<button class="pill" id="usRateModalCloseBtn">닫기</button>
+				</div>
+			</div>
+			<div class="modalBody">
+				<canvas id="usRateChart" height="360"></canvas>
+				<div class="muted" id="usRateHint" style="margin-top:10px"></div>
+			</div>
+		</div>
+	</div>
+
+	<!-- VIX Modal -->
+	<div id="vixModalOverlay" class="modalOverlay" aria-hidden="true">
+		<div id="vixModalPanel" class="modalPanel" role="dialog" aria-modal="true">
+			<div class="modalHeader">
+				<div class="modalTitle">빅스지수 (최근 3년)</div>
+				<div class="actions">
+					<button class="pill" id="vixModalCloseBtn">닫기</button>
+				</div>
+			</div>
+			<div class="modalBody">
+				<canvas id="vixChart" height="360"></canvas>
+				<div class="muted" id="vixHint" style="margin-top:10px"></div>
+			</div>
+		</div>
+	</div>
+
+	<!-- Stock Chart Modal -->
+	<div id="stockChartModalOverlay" class="modalOverlay" aria-hidden="true">
+		<div id="stockChartModalPanel" class="modalPanel" role="dialog" aria-modal="true">
+			<div class="modalHeader">
+				<div class="modalTitle" id="stockChartModalTitle">차트</div>
+				<div class="actions">
+					<div id="stockChartModalTabs" class="tabs">
+						<button class="chartTab active" type="button" data-kind="day">일봉</button>
+						<button class="chartTab" type="button" data-kind="week">주봉</button>
+						<button class="chartTab" type="button" data-kind="month">월봉</button>
+					</div>
+					<a id="stockChartModalNaverLink" class="link" href="#" target="_blank" rel="noopener">네이버 상세</a>
+					<button class="pill" id="stockChartModalCloseBtn">닫기</button>
+				</div>
+			</div>
+			<div class="modalBody">
+				<img id="stockChartModalImg" class="chartImg" alt="차트" />
+				<div id="stockChartModalOpProfitSection" class="opProfitSection" style="display:none">
+					<div class="opProfitHeader">
+						<div class="muted">영업이익 (최근 3년)</div>
+						<div style="display:flex; gap:10px; align-items:center;">
+							<div class="muted" id="stockChartModalKeyStats">-</div>
+							<div class="muted" id="stockChartModalOpProfitUnit">-</div>
+						</div>
+					</div>
+					<div id="stockChartModalOpProfitContent" class="muted">로딩중...</div>
+				</div>
+			</div>
+		</div>
+	</div>
+
+	<!-- Basket Modal -->
+	<div id="basketModalOverlay" class="modalOverlay" aria-hidden="true">
+		<div id="basketModalPanel" class="modalPanel" role="dialog" aria-modal="true">
+			<div class="modalHeader">
+				<div class="modalTitle">Basket (엑셀에서 코드 불러오기)</div>
+				<div class="actions">
+					<button class="pill" id="basketClearBtn" type="button">해제</button>
+					<button class="pill" id="basketModalCloseBtn" type="button">닫기</button>
+				</div>
+			</div>
+			<div class="modalBody">
+				<div class="formRow">
+					<input id="basketFileInput" class="inputFile" type="file" accept=".xlsx,.xls,.csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel,text/csv" />
+					<span class="muted" id="basketStatusText">엑셀 파일을 선택해 주세요 (코드 컬럼 필요)</span>
+				</div>
+				<div class="muted" id="basketHintText" style="margin-top:10px"></div>
+			</div>
+		</div>
+	</div>
+
+	<!-- Favorites Modal -->
+	<div id="favoritesModalOverlay" class="modalOverlay" aria-hidden="true">
+		<div id="favoritesModalPanel" class="modalPanel" role="dialog" aria-modal="true">
+			<div class="modalHeader">
+				<div class="modalTitle">관심종목</div>
+				<div class="actions">
+					<button class="pill" id="favoritesSaveBtn" type="button" data-busy-disable="1">저장</button>
+					<button class="pill" id="favoritesDeleteBtn" type="button" data-busy-disable="1">삭제</button>
+					<button class="pill" id="favoritesModalCloseBtn" type="button">닫기</button>
+				</div>
+			</div>
+			<div class="modalBody">
+				<div class="muted" id="favoritesModalHint" style="margin-bottom:10px">테이블에서 체크한 종목이 표시됩니다.</div>
+				<div id="favoritesModalContent" class="muted">-</div>
+			</div>
+		</div>
+	</div>
+
+	<!-- Sector Modal -->
+	<div id="sectorModalOverlay" class="modalOverlay" aria-hidden="true">
+		<div id="sectorModalPanel" class="modalPanel" role="dialog" aria-modal="true">
+			<div class="modalHeader">
+				<div class="modalTitle">섹터종목</div>
+				<div class="actions">
+					<button class="pill" id="sectorModalCloseBtn" type="button">닫기</button>
+				</div>
+			</div>
+			<div class="modalBody">
+				<div class="sectorGrid" id="sectorGrid">
+					<button class="sectorCard" type="button" data-sector="all">
+						<div class="sectorTitle">All</div>
+						<div class="sectorDesc">모든 섹터 종목</div>
+					</button>
+					<button class="sectorCard" type="button" data-sector="sobujang">
+						<div class="sectorTitle">소부장</div>
+						<div class="sectorDesc">반도체 소재·부품·장비</div>
+					</button>
+					<button class="sectorCard" type="button" data-sector="it">
+						<div class="sectorTitle">IT / 기술</div>
+						<div class="sectorDesc">반도체·디스플레이·소프트웨어</div>
+					</button>
+					<button class="sectorCard" type="button" data-sector="ev">
+						<div class="sectorTitle">2차전지 / EV</div>
+						<div class="sectorDesc">셀·소재·부품·충전인프라</div>
+					</button>
+					<button class="sectorCard" type="button" data-sector="bio">
+						<div class="sectorTitle">바이오 / 헬스케어</div>
+						<div class="sectorDesc">제약·바이오·의료기기</div>
+					</button>
+					<button class="sectorCard" type="button" data-sector="auto">
+						<div class="sectorTitle">자동차 / 부품</div>
+						<div class="sectorDesc">완성차·부품·타이어</div>
+					</button>
+					<button class="sectorCard" type="button" data-sector="energy">
+						<div class="sectorTitle">에너지 / 정유화학</div>
+						<div class="sectorDesc">정유·석화·신재생에너지</div>
+					</button>
+					<button class="sectorCard" type="button" data-sector="finance">
+						<div class="sectorTitle">금융</div>
+						<div class="sectorDesc">은행·증권·보험·카드</div>
+					</button>
+					<button class="sectorCard" type="button" data-sector="steel">
+						<div class="sectorTitle">철강 / 소재</div>
+						<div class="sectorDesc">철강·비철금속·화학소재</div>
+					</button>
+					<button class="sectorCard" type="button" data-sector="construction">
+						<div class="sectorTitle">건설 / 부동산</div>
+						<div class="sectorDesc">종합건설·시공·리츠</div>
+					</button>
+					<button class="sectorCard" type="button" data-sector="defense">
+						<div class="sectorTitle">방산 / 항공우주</div>
+						<div class="sectorDesc">방산·항공기·위성</div>
+					</button>
+					<button class="sectorCard" type="button" data-sector="consumer">
+						<div class="sectorTitle">소비재 / 유통</div>
+						<div class="sectorDesc">식품·의류·이커머스·면세</div>
+					</button>
+					<button class="sectorCard" type="button" data-sector="media">
+						<div class="sectorTitle">통신 / 미디어</div>
+						<div class="sectorDesc">이동통신·콘텐츠·게임</div>
+					</button>
+					<button class="sectorCard" type="button" data-sector="ai">
+						<div class="sectorTitle">AI / 데이터센터</div>
+						<div class="sectorDesc">AI인프라·냉각·전력·클라우드</div>
+					</button>
+					<button class="sectorCard" type="button" data-sector="ship">
+						<div class="sectorTitle">조선 / 해운</div>
+						<div class="sectorDesc">조선소·해운·항만</div>
+					</button>
+					<button class="sectorCard" type="button" data-sector="utility">
+						<div class="sectorTitle">유틸리티 / 전력</div>
+						<div class="sectorDesc">전력·가스·케이블·변압기</div>
+					</button>
+					<button class="sectorCard" type="button" data-sector="machine">
+						<div class="sectorTitle">기계 / 장비</div>
+						<div class="sectorDesc">산업기계·로봇·자동화</div>
+					</button>
+				</div>
+			</div>
+		</div>
+	</div>
+
+	<script>
+		'use strict';
+
+		let MIN_PCT = -10;
+		let MAX_PCT = 5;
+		let MARKET_FILTER = 'all';
+		let FETCH_LIMIT = 2000;
+		let DISPLAY_LIMIT = 300;
+		const RANGE_PCT_STORAGE_KEY = 'rangePct';
+		const DISPLAY_LIMIT_STORAGE_KEY = 'displayLimit';
+		const RANGE_PCT_STEP = 5;
+		const RANGE_PCT_MIN = -100;
+		const RANGE_PCT_MAX = 100;
+
+		function clamp(n, min, max) {
+			const num = Number(n);
+			if (!Number.isFinite(num)) return null;
+			return Math.min(max, Math.max(min, num));
+		}
+		function roundToStep(n, step) {
+			const num = Number(n);
+			const st = Number(step);
+			if (!Number.isFinite(num) || !Number.isFinite(st) || st <= 0) return null;
+			return Math.round(num / st) * st;
+		}
+		function normalizeMinPct(n) {
+			const stepped = roundToStep(n, RANGE_PCT_STEP);
+			return clamp(stepped, RANGE_PCT_MIN, 0);
+		}
+		function normalizeMaxPct(n) {
+			const stepped = roundToStep(n, RANGE_PCT_STEP);
+			return clamp(stepped, 0, RANGE_PCT_MAX);
+		}
+		function normalizeRangePct(minPct, maxPct) {
+			const minV = normalizeMinPct(minPct);
+			const maxV = normalizeMaxPct(maxPct);
+			if (!Number.isFinite(minV) || !Number.isFinite(maxV)) return null;
+			return { minPct: minV, maxPct: maxV };
+		}
+		function buildStepOptions(start, end, step) {
+			const s = Number(start);
+			const e = Number(end);
+			const st = Number(step);
+			if (!Number.isFinite(s) || !Number.isFinite(e) || !Number.isFinite(st) || st <= 0) return [];
+			const out = [];
+			if (s <= e) {
+				for (let v = s; v <= e; v += st) out.push(v);
+			} else {
+				for (let v = s; v >= e; v -= st) out.push(v);
+			}
+			return out;
+		}
+		function ensureRangeSelectOptions() {
+			const minEl = document.getElementById('minPctInput');
+			const maxEl = document.getElementById('maxPctInput');
+			if (!minEl || !maxEl) return;
+			// min: 0 ~ -100 (descending), max: 0 ~ 100 (ascending)
+			const minOptions = buildStepOptions(0, RANGE_PCT_MIN, RANGE_PCT_STEP);
+			const maxOptions = buildStepOptions(0, RANGE_PCT_MAX, RANGE_PCT_STEP);
+
+			minEl.innerHTML = minOptions.map(v => `<option value="${v}">${v}</option>`).join('');
+			maxEl.innerHTML = maxOptions.map(v => `<option value="${v}">${v}</option>`).join('');
+		}
+		function syncRangeSelectValuesFromState() {
+			const minEl = document.getElementById('minPctInput');
+			const maxEl = document.getElementById('maxPctInput');
+			if (minEl) minEl.value = String(MIN_PCT);
+			if (maxEl) maxEl.value = String(MAX_PCT);
+		}
+
+		function saveRangePctToStorage(minPct, maxPct) {
+			try {
+				const normalized = normalizeRangePct(minPct, maxPct);
+				if (!normalized) return;
+				localStorage.setItem(RANGE_PCT_STORAGE_KEY, JSON.stringify(normalized));
+			} catch {}
+		}
+
+		function loadRangePctFromStorage() {
+			try {
+				const raw = localStorage.getItem(RANGE_PCT_STORAGE_KEY);
+				if (!raw) return null;
+				const obj = JSON.parse(raw);
+				const minV = parseNumber(obj?.minPct);
+				const maxV = parseNumber(obj?.maxPct);
+				if (!Number.isFinite(minV) || !Number.isFinite(maxV)) return null;
+				return normalizeRangePct(minV, maxV);
+			} catch {
+				return null;
+			}
+		}
+		try {
+			const saved = parseNumber(localStorage.getItem(DISPLAY_LIMIT_STORAGE_KEY));
+			if (Number.isFinite(saved)) DISPLAY_LIMIT = Math.max(1, Math.min(2000, Math.round(saved)));
+		} catch {}
+
+		try {
+			const savedRange = loadRangePctFromStorage();
+			if (savedRange) {
+				MIN_PCT = savedRange.minPct;
+				MAX_PCT = savedRange.maxPct;
+			}
+		} catch {}
+
+		let sortKey = 'changePct';
+		let sortDir = 'asc';
+		let latestItems = [];
+		let basisSnapshot = null;
+		let busy = false;
+		let pendingRefresh = false;
+		const selectedCodes = new Set();
+
+		const targetsByCode = new Map();
+		const targetsQueue = new Set();
+		const targetsNextFetchAtMs = new Map();
+		const targetsRetryCountByCode = new Map();
+			// targets(PER/목표가/증권사 목표가) 워커는 시장/필터 전환 중 큐가 reset되면서
+			// "워커가 종료되었는데 새 큐를 처리하지 않는" 레이스가 날 수 있습니다.
+			// epoch(세대)로 워커 결과/재기동을 안전하게 가드합니다.
+			let targetsEpoch = 0;
+			let targetsWorkerPromise = null;
+			let targetsWorkerEpoch = 0;
+		function startTargetsWorkerIfNeeded() {
+				// 동일 epoch에서 이미 실행중이면 재사용
+				if (targetsWorkerPromise && targetsWorkerEpoch === targetsEpoch) return targetsWorkerPromise;
+				// epoch가 바뀌었는데 이전 워커가 남아있으면(시장 전환 등) 새 워커를 기동합니다.
+				const myEpoch = targetsEpoch;
+				targetsWorkerEpoch = myEpoch;
+				const myPromise = runTargetsWorker(myEpoch).finally(() => {
+					// 최신 워커(=myPromise)만 전역 상태를 정리
+					if (targetsWorkerPromise === myPromise) {
+						targetsWorkerPromise = null;
+						// 워커 종료 직전/직후에 새 코드가 enqueue되면 큐가 멈출 수 있어
+						// 남은 작업이 있으면 다음 tick에 워커를 다시 기동합니다.
+						if (targetsQueue.size > 0) {
+							setTimeout(() => { startTargetsWorkerIfNeeded(); }, 0);
+						}
+					}
+				});
+				targetsWorkerPromise = myPromise;
+				return myPromise;
+		}
+		const foreignFlowByCode = new Map();
+		const foreignFlowQueue = new Set();
+		let foreignFlowWorkerPromise = null;
+		function startForeignFlowWorkerIfNeeded() {
+			if (foreignFlowWorkerPromise) return foreignFlowWorkerPromise;
+			foreignFlowWorkerPromise = runForeignFlowWorker().finally(() => {
+				foreignFlowWorkerPromise = null;
+				if (foreignFlowQueue.size > 0) {
+					setTimeout(() => { startForeignFlowWorkerIfNeeded(); }, 0);
+				}
+			});
+			return foreignFlowWorkerPromise;
+		}
+		const maSignalsByCode = new Map();
+		const maSignalsQueue = new Set();
+		let maSignalsWorkerPromise = null;
+		function startMaSignalsWorkerIfNeeded() {
+			if (maSignalsWorkerPromise) return maSignalsWorkerPromise;
+			maSignalsWorkerPromise = runMaSignalsWorker().finally(() => {
+				maSignalsWorkerPromise = null;
+				if (maSignalsQueue.size > 0) {
+					setTimeout(() => { startMaSignalsWorkerIfNeeded(); }, 0);
+				}
+			});
+			return maSignalsWorkerPromise;
+		}
+		const sidewaysByCode = new Map();
+		const sidewaysQueue = new Set();
+		let sidewaysWorkerPromise = null;
+		function startSidewaysWorkerIfNeeded() {
+			if (sidewaysWorkerPromise) return sidewaysWorkerPromise;
+			sidewaysWorkerPromise = runSidewaysWorker().finally(() => {
+				sidewaysWorkerPromise = null;
+				if (sidewaysQueue.size > 0) {
+					setTimeout(() => { startSidewaysWorkerIfNeeded(); }, 0);
+				}
+			});
+			return sidewaysWorkerPromise;
+		}
+
+		let backgroundEnrichEpoch = 0;
+		let backgroundEnrichTimer = null;
+
+		let usCpiModalOpen = false;
+		let usCpiChart = null;
+		let usRateModalOpen = false;
+		let usRateChart = null;
+		let vixModalOpen = false;
+		let vixChart = null;
+
+		let stockChartModalOpen = false;
+		let stockChartModalCode = '';
+		let stockChartModalKind = 'day';
+
+		let basketModalOpen = false;
+		let basketActive = false;
+		const basketCodes = new Set();
+
+		let favoritesModalOpen = false;
+		let favoritesLoadedOnce = false;
+		const favoritesPendingDeleteCodes = new Set();
+		const favoritesSnapshotByCode = new Map();
+		const favoritesSnapshotFetchedAtMsByCode = new Map();
+		let favoritesSnapshotsInFlight = null;
+		// 팝업이 열려있는 동안 최신값이 눈에 띄게 갱신되도록
+		// 자동 갱신 주기(12s)보다 TTL을 짧게 잡아 매 tick마다 재조회되게 함
+		const FAVORITES_SNAPSHOT_TTL_MS = 10_000;
+		let favoritesModalEpoch = 0;
+		let favoritesAutoRefreshTimer = null;
+		const FAVORITES_AUTO_REFRESH_INTERVAL_MS = 12_000;
+
+		let sectorModalOpen = false;
+		function setSectorModalVisible(visible) {
+			sectorModalOpen = !!visible;
+			const overlay = document.getElementById('sectorModalOverlay');
+			if (!overlay) return;
+			overlay.classList.toggle('open', sectorModalOpen);
+			overlay.setAttribute('aria-hidden', sectorModalOpen ? 'false' : 'true');
+		}
+
+		let SECTOR_FILTER = null; // one of sectorCard[data-sector] or null
+		const SECTOR_DEFS = {
+			sobujang: {
+				label: '소부장',
+				excludeKeywords: [
+					// 디스플레이 관련 종목은 소부장에서 제외
+					'디스플레이', 'display', 'oled', 'amoled', 'lcd', 'tft', 'microled', 'qled',
+				],
+				keywords: [
+					// broader: 소재·부품·장비 전반 + 반도체(전/후공정) + 검사/계측 + 전자소재/부품
+					'소부장', '소재부품장비', '소재', '부품', '장비', '전자재료', '전자소재',
+					'반도체', 'semiconductor', 'wafer', '웨이퍼', 'fab', 'fabless', 'foundry', '파운드리',
+					'공정', '전공정', '후공정',
+					'포토', '포토레지스트', 'photoresist', '감광',
+					'노광', 'lithography', 'euv', 'duv',
+					'식각', 'etch', '건식식각', '습식식각',
+					'증착', 'deposition', 'cvd', 'pecvd', 'ald', 'pvd',
+					'산화', 'oxidation', '확산', 'diffusion',
+					'cmp', '슬러리', '연마',
+					'세정', 'clean', '클린', '클리닝',
+					'케미칼', 'chemical', '소재화학',
+					'가스', '특수가스', '불화수소', 'nf3', 'h2',
+					'필름', '코팅', '코터',
+					'세라믹', '쿼츠', 'quartz',
+					'진공', 'vacuum', '펌프', 'pump', '밸브', 'valve',
+					'정밀', '정밀가공', '부품가공',
+					'검사', 'inspection', '검출', 'detect',
+					'계측', 'metrology', '측정', 'measurement',
+					'현미경', 'microscope',
+					'테스트', 'test', 'probe', '프로브', '테스터',
+					'소켓', 'socket',
+					'패키징', 'packaging', '패키지', 'fc-bga', 'bga', 'bumping',
+					'본딩', 'bonding', 'wire', '다이', 'die',
+					'리드프레임', 'leadframe',
+					'pcb', '인쇄회로', '회로기판', 'fpcb',
+					'커넥터', 'connector', '커패시터', 'capacitor', 'mlcc',
+					'저항', 'resistor', '인덕터', 'inductor',
+					'센서', 'sensor', '제어', '컨트롤러', 'controller',
+					'모터', 'motor', '서보', 'servo',
+					'머신비전', 'vision', '검사장비', '측정장비',
+				],
+			},
+			it: {
+				label: 'IT / 기술',
+				keywords: ['반도체', '디스플레이', 'it', 'ict', '소프트웨어', 's/w', '플랫폼', '인터넷', '서버', '네트워크', '데이터', '클라우드'],
+			},
+			ev: {
+				label: '2차전지 / EV',
+				keywords: ['2차전지', '배터리', '전기차', 'ev', '양극재', '음극재', '전해질', '분리막', '리튬', '니켈', '코발트', '충전', '충전기'],
+			},
+			bio: {
+				label: '바이오 / 헬스케어',
+				keywords: ['바이오', '제약', '헬스', '의료', '진단', '백신', '의약', '병원', '의료기기'],
+			},
+			auto: {
+				label: '자동차 / 부품',
+				keywords: ['자동차', '완성차', '모빌리티', '부품', '타이어', '전장'],
+			},
+			energy: {
+				label: '에너지 / 정유화학',
+				keywords: ['에너지', '정유', '석유', '가스', '화학', '석화', '윤활', '신재생', '태양광', '풍력', '수소'],
+			},
+			finance: {
+				label: '금융',
+				keywords: ['금융', '은행', '증권', '보험', '카드', '캐피탈', '저축은행', '자산운용'],
+			},
+			steel: {
+				label: '철강 / 소재',
+				keywords: ['철강', '강관', '금속', '비철', '알루미늄', '구리', '니켈', '소재', '화학소재'],
+			},
+			construction: {
+				label: '건설 / 부동산',
+				keywords: ['건설', '부동산', '리츠', '시멘트', '플랜트', '인프라'],
+			},
+			defense: {
+				label: '방산 / 항공우주',
+				keywords: ['방산', '국방', '항공', '우주', '위성', '로켓', '드론'],
+			},
+			consumer: {
+				label: '소비재 / 유통',
+				keywords: ['소비', '유통', '리테일', '백화점', '마트', '편의점', '식품', '의류', '화장품', '면세', '이커머스', '온라인'],
+			},
+			media: {
+				label: '통신 / 미디어',
+				keywords: ['통신', '미디어', '콘텐츠', '엔터', '방송', '게임'],
+			},
+			ai: {
+				label: 'AI / 데이터센터',
+				keywords: ['ai', '인공지능', '데이터센터', '서버', '클라우드', '냉각', '전력', 'gpu', '가속기'],
+			},
+			ship: {
+				label: '조선 / 해운',
+				keywords: ['조선', '해운', '선박', '항만', '컨테이너', '물류'],
+			},
+			utility: {
+				label: '유틸리티 / 전력',
+				keywords: ['유틸리티', '전력', '가스', '발전', '변압기', '전선', '케이블', '송배전'],
+			},
+			machine: {
+				label: '기계 / 장비',
+				keywords: ['기계', '장비', '로봇', '자동화', '산업기계', '공작기계'],
+			},
+		};
+		// "All": 모든 섹터 키워드 합집합 (섹터에 속하는 종목만 모아서 표시)
+		try {
+			const allKeywords = [];
+			const seen = new Set();
+			for (const [k, def] of Object.entries(SECTOR_DEFS)) {
+				if (k === 'all') continue;
+				for (const kw of (def?.keywords || [])) {
+					const s = String(kw ?? '').trim();
+					if (!s) continue;
+					const low = s.toLowerCase();
+					if (seen.has(low)) continue;
+					seen.add(low);
+					allKeywords.push(s);
+				}
+			}
+			SECTOR_DEFS.all = { label: 'All', keywords: allKeywords };
+		} catch {}
+
+		function buildSectorHaystack(it) {
+			const parts = [
+				it?.name,
+				it?.hts_kor_isnm,
+				it?.bstp_kor_isnm,
+				it?.bstp_kor_isnm1,
+				it?.bstp_kor_isnm2,
+				it?.sector,
+			];
+			return parts.map(x => String(x ?? '').trim()).filter(Boolean).join(' ').toLowerCase();
+		}
+
+		function applySectorFilter(items) {
+			const key = String(SECTOR_FILTER ?? '').trim();
+			if (!key) return items;
+			const def = SECTOR_DEFS[key];
+			if (!def || !Array.isArray(def.keywords) || def.keywords.length === 0) return items;
+			return (items || []).filter((it) => {
+				const h = buildSectorHaystack(it);
+				if (!h) return false;
+				const excludes = Array.isArray(def.excludeKeywords) ? def.excludeKeywords : [];
+				if (excludes.length > 0) {
+					const hitExclude = excludes.some((kw) => {
+						const k = String(kw ?? '').trim().toLowerCase();
+						return k ? h.includes(k) : false;
+					});
+					if (hitExclude) return false;
+				}
+				return def.keywords.some((kw) => {
+					const k = String(kw ?? '').trim().toLowerCase();
+					return k ? h.includes(k) : false;
+				});
+			});
+		}
+
+		async function loadFavoritesFromServer() {
+			try {
+				const r = await fetch('/api/favorites', { cache: 'no-store' });
+				const j = await r.json().catch(() => ({}));
+				if (!r.ok) throw new Error(j?.error || `HTTP ${r.status}`);
+				const codes = Array.isArray(j?.codes) ? j.codes : [];
+				let changed = false;
+				for (const c of codes) {
+					const code = String(c ?? '').trim().padStart(6, '0');
+					if (!/^[0-9]{6}$/.test(code)) continue;
+					if (!selectedCodes.has(code)) {
+						selectedCodes.add(code);
+						changed = true;
+					}
+				}
+				favoritesLoadedOnce = true;
+				if (changed && typeof renderTable === 'function') {
+					// If data is already rendered, reflect checked state immediately.
+					try { renderTable(); } catch {}
+				}
+			} catch {
+				favoritesLoadedOnce = true;
+			}
+		}
+
+		async function saveFavoritesToServer() {
+			const codes = Array.from(selectedCodes).filter((c) => /^[0-9]{6}$/.test(String(c || '')));
+			const hintEl = document.getElementById('favoritesModalHint');
+			try {
+				const r = await fetch('/api/favorites', {
+					method: 'POST',
+					headers: { 'Content-Type': 'application/json' },
+					body: JSON.stringify({ codes }),
+				});
+				const j = await r.json().catch(() => ({}));
+				if (!r.ok || j?.ok === false) throw new Error(j?.error || `HTTP ${r.status}`);
+				if (hintEl) hintEl.textContent = `저장 완료: ${codes.length.toLocaleString('ko-KR')}개`;
+				return true;
+			} catch (e) {
+				if (hintEl) hintEl.textContent = `저장 실패: ${e?.message || String(e)}`;
+				return false;
+			}
+		}
+
+		async function persistFavoritesToServerWithHint(prefix) {
+			const codes = Array.from(selectedCodes).filter((c) => /^[0-9]{6}$/.test(String(c || '')));
+			const hintEl = document.getElementById('favoritesModalHint');
+			try {
+				const r = await fetch('/api/favorites', {
+					method: 'POST',
+					headers: { 'Content-Type': 'application/json' },
+					body: JSON.stringify({ codes }),
+				});
+				const j = await r.json().catch(() => ({}));
+				if (!r.ok || j?.ok === false) throw new Error(j?.error || `HTTP ${r.status}`);
+				if (hintEl) hintEl.textContent = `${prefix}: ${codes.length.toLocaleString('ko-KR')}개`;
+				return true;
+			} catch (e) {
+				if (hintEl) hintEl.textContent = `${prefix} 실패: ${e?.message || String(e)}`;
+				return false;
+			}
+		}
+
+		function getFreshFavoritesSnapshot(code) {
+			const c = String(code ?? '').trim().padStart(6, '0');
+			if (!/^[0-9]{6}$/.test(c)) return null;
+			const fetchedAt = favoritesSnapshotFetchedAtMsByCode.get(c) || 0;
+			if (!fetchedAt || (Date.now() - fetchedAt) > FAVORITES_SNAPSHOT_TTL_MS) return null;
+			return favoritesSnapshotByCode.get(c) || null;
+		}
+
+		async function ensureFavoritesSnapshotsLoaded(codesLike) {
+			const codes = Array.from(codesLike || [])
+				.map(c => String(c ?? '').trim().padStart(6, '0'))
+				.filter(c => /^[0-9]{6}$/.test(c));
+			if (codes.length === 0) return null;
+			if (favoritesSnapshotsInFlight) return favoritesSnapshotsInFlight;
+
+			// 메인 테이블(latestItems)에 숫자 현재가가 있는 종목은
+			// 팝업 스냅샷(item/main)으로 따로 갱신하지 않아야 메인/팝업 불일치가 줄어듭니다.
+			const mainItemByCode = new Map();
+			for (const it of (Array.isArray(latestItems) ? latestItems : [])) {
+				const code = String(it?.code ?? '').trim().padStart(6, '0');
+				if (/^[0-9]{6}$/.test(code) && !mainItemByCode.has(code)) mainItemByCode.set(code, it);
+			}
+			const hasMainNumericPrice = (code) => {
+				const it = mainItemByCode.get(code) || null;
+				const n = parseNumber(it?.stck_prpr);
+				return Number.isFinite(n);
+			};
+
+			// 이미 fresh 캐시로 모두 커버되면 네트워크 호출 생략
+			// 단, 메인에 가격이 있는 코드는 스냅샷 대상에서 제외
+			const missingOrStale = codes.filter(c => !getFreshFavoritesSnapshot(c) && !hasMainNumericPrice(c));
+			if (missingOrStale.length === 0) return null;
+
+			favoritesSnapshotsInFlight = (async () => {
+				try {
+					// preferItemMain=1: 팝업 갱신용으로 가벼운 item/main 시세 사용
+					const url = `/api/stock-snapshots?codes=${encodeURIComponent(missingOrStale.join(','))}&includeOutOfUniverse=1&preferItemMain=1&fallbackTtlMs=${encodeURIComponent(FAVORITES_SNAPSHOT_TTL_MS)}`;
+					const r = await fetch(url, { cache: 'no-store' });
+					const j = await r.json().catch(() => ({}));
+					if (!r.ok || j?.error) return null;
+					const items = Array.isArray(j.items) ? j.items : [];
+					for (const it of items) {
+						const c = String(it?.code ?? '').trim().padStart(6, '0');
+						if (!/^[0-9]{6}$/.test(c)) continue;
+						favoritesSnapshotByCode.set(c, it);
+						favoritesSnapshotFetchedAtMsByCode.set(c, Date.now());
+					}
+					return true;
+				} catch {
+					return null;
+				} finally {
+					favoritesSnapshotsInFlight = null;
+				}
+			})();
+
+			return favoritesSnapshotsInFlight;
+		}
+
+		function stopFavoritesAutoRefresh() {
+			if (favoritesAutoRefreshTimer) {
+				try { clearInterval(favoritesAutoRefreshTimer); } catch {}
+				favoritesAutoRefreshTimer = null;
+			}
+		}
+
+		function startFavoritesAutoRefresh(epoch) {
+			stopFavoritesAutoRefresh();
+			favoritesAutoRefreshTimer = setInterval(() => {
+				if (!favoritesModalOpen) return;
+				if (favoritesModalEpoch !== epoch) return;
+				const codes = Array.from(selectedCodes);
+				if (!codes || codes.length === 0) return;
+				ensureFavoritesSnapshotsLoaded(codes)
+					.then((started) => {
+						if (!started) return;
+						if (favoritesModalOpen && favoritesModalEpoch === epoch) {
+							try { renderFavoritesModal(); } catch {}
+						}
+					})
+					.catch(() => {});
+			}, FAVORITES_AUTO_REFRESH_INTERVAL_MS);
+		}
+
+		function renderFavoritesModal() {
+			const hintEl = document.getElementById('favoritesModalHint');
+			const contentEl = document.getElementById('favoritesModalContent');
+			if (!contentEl) return;
+			const codes = Array.from(selectedCodes);
+			if (hintEl) {
+				hintEl.textContent = codes.length
+					? `관심종목: ${codes.length.toLocaleString('ko-KR')}개 (테이블 체크 기준)`
+					: '테이블에서 체크한 종목이 표시됩니다.';
+			}
+			if (codes.length === 0) {
+				contentEl.classList.add('muted');
+				contentEl.innerHTML = '<div class="muted">체크된 종목이 없습니다.</div>';
+				return;
+			}
+			const itemByCode = new Map();
+			for (const it of (Array.isArray(latestItems) ? latestItems : [])) {
+				const code = String(it?.code ?? '').padStart(6, '0');
+				if (/^[0-9]{6}$/.test(code) && !itemByCode.has(code)) itemByCode.set(code, it);
+			}
+			// 관심종목 스냅샷 캐시(범위 밖/유니버스 밖 종목 보강)
+			for (const c of codes) {
+				const snap = getFreshFavoritesSnapshot(c);
+				if (!snap) continue;
+				const normalized = String(c ?? '').trim().padStart(6, '0');
+				if (!/^[0-9]{6}$/.test(normalized)) continue;
+				const existing = itemByCode.get(normalized) || null;
+				if (!existing) {
+					itemByCode.set(normalized, snap);
+					continue;
+				}
+				// merge: 메인 테이블(latestItems)의 숫자 값이 있으면 우선, 없으면 스냅샷으로 보강
+				const existingPriceNum = parseNumber(existing?.stck_prpr);
+				const existingVrssNum = parseNumber(existing?.prdy_vrss);
+				const existingCrtNum = parseNumber(existing?.prdy_ctrt);
+				const merged = {
+					...snap,
+					...existing,
+					name: existing?.name ?? existing?.hts_kor_isnm ?? snap?.name ?? snap?.hts_kor_isnm ?? null,
+					stck_prpr: Number.isFinite(existingPriceNum)
+						? (existing?.stck_prpr ?? null)
+						: ((snap?.stck_prpr ?? null) ?? (existing?.stck_prpr ?? null)),
+					prdy_vrss: Number.isFinite(existingVrssNum)
+						? (existing?.prdy_vrss ?? null)
+						: ((snap?.prdy_vrss ?? null) ?? (existing?.prdy_vrss ?? null)),
+					prdy_ctrt: Number.isFinite(existingCrtNum)
+						? (existing?.prdy_ctrt ?? null)
+						: ((snap?.prdy_ctrt ?? null) ?? (existing?.prdy_ctrt ?? null)),
+				};
+				itemByCode.set(normalized, merged);
+			}
+			codes.sort();
+			const rowsHtml = codes.map((code) => {
+				const it = itemByCode.get(code) || null;
+				const name = escapeHtml(it?.name || it?.hts_kor_isnm || '-');
+				const priceText = escapeHtml(formatWon(it?.stck_prpr));
+				const changePctNum = parseNumber(it?.prdy_ctrt);
+				const changePctText = Number.isFinite(changePctNum) ? escapeHtml(formatPct(changePctNum, 2)) : '-';
+				const cls = Number.isFinite(changePctNum) ? (changePctNum > 0 ? 'up' : (changePctNum < 0 ? 'down' : '')) : '';
+				const delCheckedAttr = favoritesPendingDeleteCodes.has(code) ? 'checked' : '';
+				return `
+					<tr data-code="${escapeHtml(code)}">
+						<td>
+							<label class="stockPick">
+								<input class="stockCheckbox favoritesDeleteCheckbox" type="checkbox" data-code="${escapeHtml(code)}" aria-label="${name} 삭제 선택" ${delCheckedAttr} />
+								<span class="stockNameText">${name}</span>
+							</label>
+						</td>
+						<td class="code">${escapeHtml(code)}</td>
+						<td class="right">${priceText}</td>
+						<td class="right ${cls}">${changePctText}</td>
+					</tr>
+				`;
+			}).join('');
+			contentEl.classList.remove('muted');
+			contentEl.innerHTML = [
+				'<div class="favoritesTableWrap">',
+				'<table class="stockTable favoritesStockTable">',
+				'<colgroup><col /><col style="width:120px" /><col style="width:120px" /><col style="width:110px" /></colgroup>',
+				'<thead><tr><th scope="col">종목</th><th scope="col">코드</th><th scope="col" class="right">현재가</th><th scope="col" class="right">등락률 ▲</th></tr></thead>',
+				'<tbody>',
+				rowsHtml,
+				'</tbody></table></div>',
+			].join('');
+		}
+
+		function setFavoritesModalVisible(visible) {
+			favoritesModalOpen = !!visible;
+			const overlay = document.getElementById('favoritesModalOverlay');
+			if (!overlay) return;
+			overlay.classList.toggle('open', favoritesModalOpen);
+			overlay.setAttribute('aria-hidden', favoritesModalOpen ? 'false' : 'true');
+			if (favoritesModalOpen) {
+				const myEpoch = ++favoritesModalEpoch;
+				startFavoritesAutoRefresh(myEpoch);
+				// 1) 1차 렌더: 일단 화면에 팝업을 띄우고 로딩 표시
+				try {
+					const contentEl = document.getElementById('favoritesModalContent');
+					if (contentEl) {
+						contentEl.classList.add('muted');
+						contentEl.innerHTML = '<div class="muted">로딩중...</div>';
+					}
+					try { renderFavoritesModal(); } catch {}
+				} catch {}
+
+				// 2) 2차 렌더: 모달이 열려있는 동안에만 전체 스냅샷을 미리 조회 후 최종 렌더
+				(async () => {
+					try {
+						if (!favoritesLoadedOnce) await loadFavoritesFromServer().catch(() => {});
+						await ensureFavoritesSnapshotsLoaded(Array.from(selectedCodes)).catch(() => {});
+					} finally {
+						// 모달이 계속 열려있고 같은 epoch일 때만 2차 렌더
+						if (favoritesModalOpen && favoritesModalEpoch === myEpoch) {
+							try { renderFavoritesModal(); } catch {}
+						}
+					}
+				})();
+			}
+			else {
+				stopFavoritesAutoRefresh();
+			}
+		}
+
+		function setControlsBusy(nextBusy) {
+			busy = !!nextBusy;
+			document.body.style.cursor = busy ? 'progress' : '';
+			document.querySelectorAll('[data-busy-disable="1"]').forEach((el) => {
+				try { el.disabled = busy; } catch {}
+			});
+		}
+
+		function parseNumber(value) {
+			// Be tolerant:
+			// - allow extra text (e.g. "-5~5%", "1,234원")
+			// - normalize unicode minus/hyphen variants
+			const raw = String(value ?? '').trim();
+			if (!raw || raw === '-') return null;
+			const normalized = raw
+				.replace(/,/g, '')
+				.replace(/%/g, '')
+				.replace(/[\u2212\u2013\u2014\uFF0D]/g, '-');
+			const m = normalized.match(/[-+]?\d*\.?\d+(?:e[-+]?\d+)?/i);
+			if (!m) return null;
+			const n = Number(m[0]);
+			return Number.isFinite(n) ? n : null;
+		}
+
+		function updateStickyHeaderTopOffset() {
+			const topHeader = document.getElementById('topHeader');
+			const h = topHeader ? topHeader.offsetHeight : 0;
+			const px = `${Math.max(0, h)}px`;
+			document.documentElement.style.setProperty('--tableHeaderTop', px);
+			document.documentElement.style.setProperty('--topHeaderH', px);
+		}
+
+		function observeTopHeaderSize() {
+			const topHeader = document.getElementById('topHeader');
+			if (!topHeader) return;
+			if (typeof ResizeObserver === 'function') {
+				const ro = new ResizeObserver(() => {
+					updateStickyHeaderTopOffset();
+				});
+				ro.observe(topHeader);
+			}
+		}
+
+		function formatWon(value) {
+			const n = parseNumber(value);
+			if (!Number.isFinite(n)) return '-';
+			return `${Math.round(n).toLocaleString('ko-KR')}원`;
+		}
+
+		function formatPct(value, digits = 2) {
+			const n = Number(value);
+			if (!Number.isFinite(n)) return '-';
+			return `${n.toLocaleString('ko-KR', { minimumFractionDigits: digits, maximumFractionDigits: digits })}%`;
+		}
+
+		function formatRsi(value, digits = 2) {
+			const n = Number(value);
+			if (!Number.isFinite(n)) return '-';
+			return n.toLocaleString('ko-KR', { minimumFractionDigits: digits, maximumFractionDigits: digits });
+		}
+
+		function formatSignedInt(value) {
+			const n = parseNumber(value);
+			if (!Number.isFinite(n)) return '-';
+			const sign = n > 0 ? '+' : '';
+			return `${sign}${Math.round(n).toLocaleString('ko-KR')}`;
+		}
+
+		function formatMaybeInt(value) {
+			const n = parseNumber(value);
+			if (!Number.isFinite(n)) return '-';
+			// 영업이익은 + 기호 없이 표시(음수만 - 유지)
+			return `${Math.round(n).toLocaleString('ko-KR')}`;
+		}
+
+		function escapeHtml(text) {
+			return String(text ?? '')
+				.replace(/&/g, '&amp;')
+				.replace(/</g, '&lt;')
+				.replace(/>/g, '&gt;')
+				.replace(/"/g, '&quot;')
+				.replace(/'/g, '&#39;');
+		}
+
+		function baseHeaderLabel(text) {
+			return String(text ?? '').replace(/[▲▼]\s*$/, '').trim();
+		}
+
+		function formatFileTimestamp(d = new Date()) {
+			const pad = (n) => String(n).padStart(2, '0');
+			return `${d.getFullYear()}${pad(d.getMonth() + 1)}${pad(d.getDate())}_${pad(d.getHours())}${pad(d.getMinutes())}${pad(d.getSeconds())}`;
+		}
+
+		const EXPORT_COLUMNS = ['종목', '코드', '현재가', '등락률', 'KB', 'NH', 'KIS'];
+
+		function exportCheckedRowsToExcel() {
+			if (!window.XLSX) {
+				alert('엑셀 저장 라이브러리(XLSX) 로드 실패');
+				return;
+			}
+			const table = document.getElementById('stockTable');
+			if (!table) return;
+
+			const checked = Array.from(document.querySelectorAll('#stockTable tbody input.stockCheckbox:checked'));
+			if (checked.length === 0) {
+				alert('저장할 종목을 체크해 주세요.');
+				return;
+			}
+
+			const headerCells = Array.from(document.querySelectorAll('#stockTable thead th'));
+			const allHeaders = headerCells.map((th) => {
+				const base = th.getAttribute('data-base-label') || th.textContent;
+				return baseHeaderLabel(base);
+			});
+			const headerIndexByLabel = new Map(allHeaders.map((label, idx) => [label, idx]));
+			const colIdxs = EXPORT_COLUMNS
+				.map((label) => ({ label, idx: headerIndexByLabel.get(label) }))
+				.filter((x) => Number.isInteger(x.idx) && x.idx >= 0);
+			const headers = colIdxs.map((x) => x.label);
+
+			const rows = checked.map((cb) => {
+				const tr = cb.closest('tr');
+				if (!tr) return null;
+				const cells = Array.from(tr.cells).map((td) => String(td.textContent ?? '').trim());
+				return colIdxs.map((x) => cells[x.idx] ?? '');
+			}).filter(Boolean);
+
+			const aoa = [headers, ...rows];
+			const ws = XLSX.utils.aoa_to_sheet(aoa);
+			const wb = XLSX.utils.book_new();
+			XLSX.utils.book_append_sheet(wb, ws, '선택종목');
+
+			const filename = `전일대비_${MIN_PCT}~${MAX_PCT}_${MARKET_FILTER}_${formatFileTimestamp()}.xlsx`;
+			XLSX.writeFile(wb, filename);
+		}
+
+		function setBasketModalVisible(visible) {
+			basketModalOpen = !!visible;
+			const overlay = document.getElementById('basketModalOverlay');
+			if (!overlay) return;
+			overlay.classList.toggle('open', basketModalOpen);
+			overlay.setAttribute('aria-hidden', basketModalOpen ? 'false' : 'true');
+			if (basketModalOpen) {
+				const status = document.getElementById('basketStatusText');
+				const hint = document.getElementById('basketHintText');
+				if (status) status.textContent = '엑셀 파일을 선택해 주세요 (코드 컬럼 필요)';
+				if (hint) hint.textContent = basketActive ? `적용중: ${basketCodes.size.toLocaleString('ko-KR')}개 코드` : '미적용';
+			}
+		}
+
+		function normalizeCode(value) {
+			const raw = String(value ?? '').trim();
+			if (!raw) return null;
+			const digits = raw.replace(/[^0-9]/g, '');
+			if (!digits) return null;
+			const code = digits.padStart(6, '0').slice(-6);
+			return /^[0-9]{6}$/.test(code) ? code : null;
+		}
+
+		async function loadBasketFromExcelFile(file) {
+			if (!file) return;
+			const status = document.getElementById('basketStatusText');
+			const hint = document.getElementById('basketHintText');
+			if (!window.XLSX) {
+				alert('엑셀 처리 라이브러리(XLSX) 로드 실패');
+				return;
+			}
+			if (status) status.textContent = '읽는 중...';
+			try {
+				const buf = await file.arrayBuffer();
+				const wb = XLSX.read(buf, { type: 'array' });
+				const sheetName = wb.SheetNames?.[0];
+				if (!sheetName) throw new Error('시트가 없습니다');
+				const ws = wb.Sheets[sheetName];
+				const aoa = XLSX.utils.sheet_to_json(ws, { header: 1, blankrows: false, raw: true });
+				if (!Array.isArray(aoa) || aoa.length === 0) throw new Error('데이터가 비어있습니다');
+				const headerRow = aoa[0].map((x) => String(x ?? '').trim());
+				const codeColIdx = headerRow.findIndex((h) => baseHeaderLabel(h) === '코드');
+				if (codeColIdx < 0) throw new Error('엑셀 첫 행에서 "코드" 컬럼을 찾지 못했습니다');
+
+				basketCodes.clear();
+				for (let r = 1; r < aoa.length; r++) {
+					const row = aoa[r];
+					if (!Array.isArray(row)) continue;
+					const code = normalizeCode(row[codeColIdx]);
+					if (code) basketCodes.add(code);
+				}
+				basketActive = true;
+				if (hint) hint.textContent = `적용중: ${basketCodes.size.toLocaleString('ko-KR')}개 코드`;
+				if (status) status.textContent = `완료: ${file.name}`;
+				renderTable();
+			} catch (e) {
+				basketActive = false;
+				basketCodes.clear();
+				if (hint) hint.textContent = '미적용';
+				if (status) status.textContent = `실패: ${e?.message || String(e)}`;
+				alert(`basket 불러오기 실패: ${e?.message || String(e)}`);
+			}
+		}
+
+		function setMarket(next) {
+			if (!['kospi', 'kosdaq', 'all'].includes(next)) return;
+			MARKET_FILTER = next;
+			document.getElementById('marketKospiBtn')?.classList.toggle('active', next === 'kospi');
+			document.getElementById('marketKosdaqBtn')?.classList.toggle('active', next === 'kosdaq');
+			document.getElementById('marketAllBtn')?.classList.toggle('active', next === 'all');
+			resetEnrichmentQueuesAndBackground();
+			requestImmediateRefresh();
+		}
+
+		function setSort(nextKey) {
+			if (!nextKey) return;
+			if (sortKey === nextKey) sortDir = sortDir === 'asc' ? 'desc' : 'asc';
+			else { sortKey = nextKey; sortDir = 'asc'; }
+			updateSortHeaderLabels();
+			renderTable();
+		}
+
+		function updateSortHeaderLabels() {
+			const ths = document.querySelectorAll('#stockTable thead th[data-sort-key]');
+			ths.forEach((th) => {
+				const key = th.getAttribute('data-sort-key');
+				const base = th.getAttribute('data-base-label') || th.textContent.replace(/[▲▼]\s*$/, '').trim();
+				th.setAttribute('data-base-label', base);
+				if (key === sortKey) th.textContent = `${base} ${sortDir === 'asc' ? '▲' : '▼'}`;
+				else th.textContent = base;
+			});
+		}
+
+		function getSortValue(item, key) {
+			const code = String(item?.code ?? '').padStart(6, '0');
+			const t = targetsByCode.get(code) || null;
+			const f = foreignFlowByCode.get(code) || null;
+				const m = maSignalsByCode.get(code) || null;
+			const s = sidewaysByCode.get(code) || null;
+			switch (key) {
+				case 'name': return String(item?.name || item?.hts_kor_isnm || code || '');
+				case 'code': return code;
+				case 'price': return parseNumber(item?.stck_prpr);
+				case 'changePct': return parseNumber(item?.prdy_ctrt);
+				case 'rsi14': return Number.isFinite(Number(m?.rsi14)) ? Number(m.rsi14) : null;
+				case 'sidewaysScore': return Number.isFinite(Number(s?.score)) ? Number(s.score) : null;
+					case 'disparity5Pct': return Number.isFinite(Number(m?.disparity5Pct)) ? Number(m.disparity5Pct) : null;
+				case 'frgn_net_qty': return parseNumber(f?.frgn_net_qty);
+				case 'current_per': return Number.isFinite(Number(t?.current_per)) ? Number(t.current_per) : null;
+				case 'target_prc': return parseNumber(t?.target_prc);
+				case 'kb_tp': return parseNumber(t?.kb_tp);
+				case 'nh_tp': return parseNumber(t?.nh_tp);
+				case 'kis_tp': return parseNumber(t?.kis_tp);
+				default: return null;
+			}
+		}
+
+		function sortItems(items) {
+			const dirMul = sortDir === 'asc' ? 1 : -1;
+			const arr = items.map((it, idx) => ({ it, idx, v: getSortValue(it, sortKey) }));
+			const isString = sortKey === 'name' || sortKey === 'code';
+			arr.sort((a, b) => {
+				if (isString) {
+					const av = String(a.v ?? '');
+					const bv = String(b.v ?? '');
+					const aMissing = !av;
+					const bMissing = !bv;
+					if (aMissing && bMissing) return a.idx - b.idx;
+					if (aMissing) return 1;
+					if (bMissing) return -1;
+					const cmp = av.localeCompare(bv, 'ko', { numeric: true, sensitivity: 'base' });
+					return cmp === 0 ? (a.idx - b.idx) : (cmp * dirMul);
+				}
+				const av = Number(a.v);
+				const bv = Number(b.v);
+				const aFinite = Number.isFinite(av);
+				const bFinite = Number.isFinite(bv);
+				if (!aFinite && !bFinite) return a.idx - b.idx;
+				if (!aFinite) return 1;
+				if (!bFinite) return -1;
+				if (av === bv) return a.idx - b.idx;
+				return (av < bv ? -1 : 1) * dirMul;
+			});
+			return arr.map(x => x.it);
+		}
+
+		function getOrderedDisplayItems() {
+			const items = applySearch(applySectorFilter(applyBasketFilter(latestItems)));
+			return sortItems(items).slice(0, Math.max(0, Number(DISPLAY_LIMIT) || 0));
+		}
+
+		function getOrderedUniverseItems() {
+			const items = applySearch(applySectorFilter(applyBasketFilter(latestItems)));
+			return sortItems(items);
+		}
+
+		function cancelBackgroundEnrichment() {
+			backgroundEnrichEpoch++;
+			if (backgroundEnrichTimer) {
+				clearTimeout(backgroundEnrichTimer);
+				backgroundEnrichTimer = null;
+			}
+		}
+
+		function resetEnrichmentQueuesAndBackground() {
+			cancelBackgroundEnrichment();
+				// targets는 시장 전환 중 워커 레이스를 피하기 위해 epoch를 증가시켜
+				// 이전 워커의 결과/재기동이 새 상태를 오염시키지 않게 합니다.
+				targetsEpoch += 1;
+			targetsQueue.clear();
+			targetsNextFetchAtMs.clear();
+			targetsRetryCountByCode.clear();
+			foreignFlowQueue.clear();
+			maSignalsQueue.clear();
+			sidewaysQueue.clear();
+		}
+
+		function startBackgroundEnrichment(restCodes) {
+			cancelBackgroundEnrichment();
+			const epoch = backgroundEnrichEpoch;
+			const codes = Array.isArray(restCodes) ? restCodes.slice() : [];
+			let idx = 0;
+			const step = () => {
+				if (epoch !== backgroundEnrichEpoch) return;
+				if (idx >= codes.length) return;
+				const chunk = codes.slice(idx, idx + 80);
+				idx += 80;
+				loadTargetsForCodes(chunk).catch(() => {});
+				loadForeignFlowsForCodes(chunk).catch(() => {});
+				loadMaSignalsForCodes(chunk).catch(() => {});
+				loadSidewaysForCodes(chunk).catch(() => {});
+				backgroundEnrichTimer = setTimeout(step, 1500);
+			};
+			backgroundEnrichTimer = setTimeout(step, 700);
+		}
+
+		function applySearch(items) {
+			const q = String(document.getElementById('stockSearchInput')?.value ?? '').trim();
+			if (!q) return items;
+			// Support multiple terms: "기아, 삼성전자 005930" -> OR search
+			const tokens = q
+				.split(/[\s,]+/g)
+				.map(t => t.trim().toLowerCase())
+				.filter(Boolean);
+			if (tokens.length === 0) return items;
+			return items.filter((it) => {
+				const name = String(it?.name || it?.hts_kor_isnm || '').toLowerCase();
+				const code = String(it?.code || '').padStart(6, '0');
+				return tokens.some((tk) => {
+					if (!tk) return false;
+					if (/^[0-9]+$/.test(tk)) {
+						const pad6 = tk.padStart(6, '0');
+						return code.includes(tk) || code.includes(pad6);
+					}
+					return name.includes(tk) || code.includes(tk);
+				});
+			});
+		}
+
+		function applyBasketFilter(items) {
+			if (!basketActive) return items;
+			if (basketCodes.size === 0) return [];
+			return (items || []).filter((it) => {
+				const code = String(it?.code ?? '').padStart(6, '0');
+				return basketCodes.has(code);
+			});
+		}
+
+		function renderTable() {
+			const tbody = document.querySelector('#stockTable tbody');
+			if (!tbody) return;
+			const ordered = getOrderedDisplayItems();
+			if (ordered.length === 0) {
+				const totalColumns = document.querySelectorAll('#stockTable thead th').length || 15;
+				const fetchedCount = Array.isArray(latestItems) ? latestItems.length : 0;
+				const searchOn = !!String(document.getElementById('stockSearchInput')?.value ?? '').trim();
+				const basketOn = basketActive;
+				const hints = [];
+				if (searchOn) hints.push('검색');
+				if (basketOn) hints.push('basket');
+				const hintText = hints.length ? ` (${hints.join('/') } 필터 확인)` : '';
+				tbody.innerHTML = `
+					<tr>
+						<td class="muted" colspan="${totalColumns}">표시할 종목이 없습니다. (수집 ${fetchedCount}개)${escapeHtml(hintText)}</td>
+					</tr>
+				`;
+				return;
+			}
+			tbody.innerHTML = ordered.map((it) => {
+				const code = String(it?.code ?? '').padStart(6, '0');
+				const name = escapeHtml(it?.name || it?.hts_kor_isnm || code || '-');
+				const pickId = `pick-${code}`;
+				const checkedAttr = selectedCodes.has(code) ? 'checked' : '';
+				const priceNum = parseNumber(it?.stck_prpr);
+				const price = formatWon(it?.stck_prpr);
+				const changePctNum = parseNumber(it?.prdy_ctrt);
+				const changePctText = Number.isFinite(changePctNum) ? formatPct(changePctNum, 2) : '-';
+							const cls = Number.isFinite(changePctNum) ? (changePctNum > 0 ? 'up' : (changePctNum < 0 ? 'down' : '')) : '';
+							const m = maSignalsByCode.get(code) || null;
+						const rsiNum = Number.isFinite(Number(m?.rsi14)) ? Number(m.rsi14) : null;
+						const rsiText = Number.isFinite(rsiNum) ? formatRsi(rsiNum, 2) : '-';
+						const s = sidewaysByCode.get(code) || null;
+						const sidewaysScoreNum = Number.isFinite(Number(s?.score)) ? Number(s.score) : null;
+						const sidewaysLabel = String(s?.label ?? '').trim();
+						const sidewaysText = Number.isFinite(sidewaysScoreNum)
+							? `${sidewaysLabel || '횡보'} ${Math.round(sidewaysScoreNum)}점`
+							: '-';
+							const disparityNum = Number.isFinite(Number(m?.disparity5Pct)) ? Number(m.disparity5Pct) : null;
+							const disparityText = Number.isFinite(disparityNum) ? formatPct(disparityNum, 1) : '-';
+							const disparitySignal = String(m?.disparitySignal ?? '').trim();
+							const disparityLabel = (disparitySignal === '과매수' || disparitySignal === '과매도') ? ` ${disparitySignal}` : '';
+							const disparityCls = disparitySignal === '과매수' ? 'up' : (disparitySignal === '과매도' ? 'down' : '');
+				const f = foreignFlowByCode.get(code) || null;
+				const flowNum = parseNumber(f?.frgn_net_qty);
+				const flowText = Number.isFinite(flowNum) ? formatSignedInt(flowNum) : '-';
+				const flowCls = Number.isFinite(flowNum) ? (flowNum > 0 ? 'up' : (flowNum < 0 ? 'down' : '')) : '';
+				const t = targetsByCode.get(code) || null;
+				const kbTpNum = parseNumber(t?.kb_tp);
+				const nhTpNum = parseNumber(t?.nh_tp);
+				const kisTpNum = parseNumber(t?.kis_tp);
+				const brokerTargets = [kbTpNum, nhTpNum, kisTpNum].filter(Number.isFinite);
+				const priceBelowTarget = Number.isFinite(priceNum)
+					&& brokerTargets.length > 0
+					&& brokerTargets.some(tp => priceNum < tp);
+				const perNum = Number.isFinite(Number(t?.current_per)) ? Number(t.current_per) : null;
+				const perText = Number.isFinite(perNum)
+					? `${perNum.toLocaleString('ko-KR', { minimumFractionDigits: 1, maximumFractionDigits: 1 })}배`
+					: '-';
+				const tp = formatWon(t?.target_prc);
+				const kb = formatWon(t?.kb_tp);
+				const nh = formatWon(t?.nh_tp);
+				const kis = formatWon(t?.kis_tp);
+				return `
+					<tr data-code="${escapeHtml(code)}">
+						<td>
+							<label class="stockPick" for="${escapeHtml(pickId)}">
+								<input id="${escapeHtml(pickId)}" class="stockCheckbox" type="checkbox" data-code="${escapeHtml(code)}" aria-label="${name} 선택" ${checkedAttr} />
+								<span class="stockNameText">${name}</span>
+							</label>
+						</td>
+						<td class="code">${escapeHtml(code)}</td>
+						<td class="right ${priceBelowTarget ? 'up' : ''}">${escapeHtml(price)}</td>
+						<td class="right ${cls}">${escapeHtml(changePctText)}</td>
+						<td class="right">${escapeHtml(rsiText)}</td>
+						<td class="right">${escapeHtml(sidewaysText)}</td>
+							<td class="right ${disparityCls}">${escapeHtml(disparityText + disparityLabel)}</td>
+						<td class="right ${flowCls}">${escapeHtml(flowText)}</td>
+						<td class="right">${escapeHtml(perText)}</td>
+						<td class="right">${escapeHtml(tp)}</td>
+						<td class="right">${escapeHtml(kb)}</td>
+						<td class="right">${escapeHtml(nh)}</td>
+						<td class="right">${escapeHtml(kis)}</td>
+					</tr>
+				`;
+			}).join('');
+			if (favoritesModalOpen) {
+				try { renderFavoritesModal(); } catch {}
+			}
+		}
+
+		function enqueueSidewaysCodes(codes) {
+			for (const c of (codes || [])) {
+				const code = String(c ?? '').trim().padStart(6, '0');
+				if (/^[0-9]{6}$/.test(code)) sidewaysQueue.add(code);
+			}
+		}
+
+		async function runSidewaysWorker() {
+			const TTL_MS = 10 * 60_000;
+			while (sidewaysQueue.size > 0) {
+				const now = Date.now();
+				const batch = Array.from(sidewaysQueue).slice(0, 140);
+				for (const c of batch) sidewaysQueue.delete(c);
+				const needed = batch.filter((c) => {
+					const entry = sidewaysByCode.get(c);
+					if (!entry) return true;
+					return (now - (entry.fetchedAtMs || 0)) > TTL_MS;
+				});
+				if (needed.length === 0) continue;
+				const url = `/api/sideways-scores?codes=${encodeURIComponent(needed.join(','))}&count=90`;
+				const r = await fetch(url, { cache: 'no-store' });
+				const j = await r.json().catch(() => ({}));
+				if (!r.ok || j?.error) continue;
+				const items = Array.isArray(j.items) ? j.items : [];
+				let changed = false;
+				for (const it of items) {
+					const code = String(it?.code ?? '').padStart(6, '0');
+					if (!/^[0-9]{6}$/.test(code)) continue;
+					const prev = sidewaysByCode.get(code);
+					const next = {
+						code,
+						score: it?.score ?? null,
+						label: it?.label ?? null,
+						fetchedAtMs: Date.now(),
+					};
+					sidewaysByCode.set(code, next);
+					if (!prev) changed = true;
+					else {
+						const keys = ['score', 'label'];
+						if (keys.some(k => String(prev?.[k] ?? '') !== String(next?.[k] ?? ''))) changed = true;
+					}
+				}
+				if (changed) renderTable();
+				await new Promise(r2 => setTimeout(r2, 10));
+			}
+		}
+
+		async function loadSidewaysForCodes(codes) {
+			enqueueSidewaysCodes(codes);
+			return startSidewaysWorkerIfNeeded();
+		}
+
+		function enqueueMaSignalsCodes(codes) {
+			for (const c of (codes || [])) {
+				const code = String(c ?? '').trim().padStart(6, '0');
+				if (/^[0-9]{6}$/.test(code)) maSignalsQueue.add(code);
+			}
+		}
+
+		async function runMaSignalsWorker() {
+			const TTL_MS = 10 * 60_000;
+			while (maSignalsQueue.size > 0) {
+				const now = Date.now();
+				const batch = Array.from(maSignalsQueue).slice(0, 180);
+				for (const c of batch) maSignalsQueue.delete(c);
+				const needed = batch.filter((c) => {
+					const entry = maSignalsByCode.get(c);
+					if (!entry) return true;
+					return (now - (entry.fetchedAtMs || 0)) > TTL_MS;
+				});
+				if (needed.length === 0) continue;
+				const url = `/api/ma-signals?codes=${encodeURIComponent(needed.join(','))}&count=60`;
+				const r = await fetch(url, { cache: 'no-store' });
+				const j = await r.json().catch(() => ({}));
+				if (!r.ok || j?.error) continue;
+				const items = Array.isArray(j.items) ? j.items : [];
+				let changed = false;
+				for (const it of items) {
+					const code = String(it?.code ?? '').padStart(6, '0');
+					if (!/^[0-9]{6}$/.test(code)) continue;
+					const prev = maSignalsByCode.get(code);
+					const next = {
+						code,
+						disparity5Pct: it?.disparity5Pct ?? null,
+						disparitySignal: it?.disparitySignal ?? null,
+						rsi14: it?.rsi14 ?? null,
+						fetchedAtMs: Date.now(),
+					};
+					maSignalsByCode.set(code, next);
+					if (!prev) changed = true;
+					else {
+						const keys = ['disparity5Pct', 'disparitySignal', 'rsi14'];
+						if (keys.some(k => String(prev?.[k] ?? '') !== String(next?.[k] ?? ''))) changed = true;
+					}
+				}
+				if (changed) renderTable();
+				await new Promise(r2 => setTimeout(r2, 10));
+			}
+		}
+
+		async function loadMaSignalsForCodes(codes) {
+			enqueueMaSignalsCodes(codes);
+			return startMaSignalsWorkerIfNeeded();
+		}
+
+		function pickUniqueCodesFromItems(items) {
+			return Array.from(
+				new Set(
+					(items || [])
+						.map(x => String(x?.code ?? '').padStart(6, '0'))
+						.filter(c => /^[0-9]{6}$/.test(c))
+				)
+			);
+		}
+
+		function enqueueForeignFlowCodes(codes) {
+			for (const c of (codes || [])) {
+				const code = String(c ?? '').trim().padStart(6, '0');
+				if (/^[0-9]{6}$/.test(code)) foreignFlowQueue.add(code);
+			}
+		}
+
+		async function runForeignFlowWorker() {
+			const TTL_MS = 35_000;
+			const API_TTL_MS = 35_000;
+			while (foreignFlowQueue.size > 0) {
+				const now = Date.now();
+				const batch = Array.from(foreignFlowQueue).slice(0, 120);
+				for (const c of batch) foreignFlowQueue.delete(c);
+				const needed = batch.filter((c) => {
+					const entry = foreignFlowByCode.get(c);
+					if (!entry) return true;
+					return (now - (entry.fetchedAtMs || 0)) > TTL_MS;
+				});
+				if (needed.length === 0) continue;
+				const url = `/api/foreign-flows?codes=${encodeURIComponent(needed.join(','))}&ttlMs=${encodeURIComponent(API_TTL_MS)}`;
+				const r = await fetch(url, { cache: 'no-store' });
+				const j = await r.json().catch(() => ({}));
+				if (!r.ok || j?.error) continue;
+				const items = Array.isArray(j.items) ? j.items : [];
+				let changed = false;
+				for (const it of items) {
+					const code = String(it?.code ?? '').padStart(6, '0');
+					if (!/^[0-9]{6}$/.test(code)) continue;
+					const prev = foreignFlowByCode.get(code);
+					const next = {
+						code,
+						date: it?.date ?? null,
+						marketDiv: it?.marketDiv ?? null,
+						mode: it?.mode ?? null,
+						frgn_net_qty: it?.frgn_net_qty ?? null,
+						fetchedAtMs: Date.now(),
+					};
+					foreignFlowByCode.set(code, next);
+					if (!prev) changed = true;
+					else if (String(prev.frgn_net_qty ?? '') !== String(next.frgn_net_qty ?? '')) changed = true;
+				}
+				if (changed) renderTable();
+				await new Promise(r2 => setTimeout(r2, 10));
+			}
+		}
+
+		async function loadForeignFlowsForCodes(codes) {
+			enqueueForeignFlowCodes(codes);
+			return startForeignFlowWorkerIfNeeded();
+		}
+
+		async function fetchDecliners() {
+			const sectorQ = SECTOR_FILTER ? `&includeSector=1` : '';
+			const url = `/api/range-stocks?minPct=${encodeURIComponent(MIN_PCT)}&maxPct=${encodeURIComponent(MAX_PCT)}&limit=${encodeURIComponent(FETCH_LIMIT)}&market=${encodeURIComponent(MARKET_FILTER)}${sectorQ}`;
+			const r = await fetch(url);
+			const j = await r.json().catch(() => ({}));
+			if (!r.ok || j?.error) throw new Error(j?.error || `HTTP ${r.status}`);
+			return Array.isArray(j.items) ? j.items : [];
+		}
+
+		function chunk(arr, size) {
+			const out = [];
+			for (let i = 0; i < arr.length; i += size) out.push(arr.slice(i, i + size));
+			return out;
+		}
+
+		function enqueueTargetsCodes(codes) {
+			for (const c of (codes || [])) {
+				const code = String(c ?? '').trim().padStart(6, '0');
+				if (!/^[0-9]{6}$/.test(code)) continue;
+				targetsQueue.add(code);
+				if (!targetsNextFetchAtMs.has(code)) targetsNextFetchAtMs.set(code, 0);
+			}
+		}
+
+		function coalesceDefined(a, b) {
+			// undefined만 "값 없음"으로 취급합니다.
+			// null은 백엔드가 의도적으로 "없음/계산불가"로 내려준 값일 수 있으므로 그대로 반영합니다.
+			return (a === undefined) ? b : a;
+		}
+
+		function isTargetsEntryComplete(entry) {
+			if (!entry) return false;
+			// If backend says nothing is pending, treat it as "complete enough"
+			// even when values are null (some stocks legitimately have no target data).
+			if (Array.isArray(entry.pending) && entry.pending.length === 0) return true;
+			const keys = ['current_per', 'target_prc', 'kb_tp', 'nh_tp', 'kis_tp'];
+			return keys.some((k) => entry[k] !== undefined && entry[k] !== null);
+		}
+
+		async function fetchJsonWithTimeout(url, timeoutMs) {
+			const ms = Math.max(1_000, Math.min(30_000, Number(timeoutMs) || 0));
+			if (!('AbortController' in window) || !Number.isFinite(ms)) {
+				const r = await fetch(url, { cache: 'no-store' });
+				const j = await r.json().catch(() => ({}));
+				return { r, j };
+			}
+			const ac = new AbortController();
+			const t = setTimeout(() => ac.abort(), ms);
+			try {
+				const r = await fetch(url, { cache: 'no-store', signal: ac.signal });
+				const j = await r.json().catch(() => ({}));
+				return { r, j };
+			} finally {
+				clearTimeout(t);
+			}
+		}
+
+			async function runTargetsWorker(workerEpoch) {
+			// Targets change slowly; avoid hammering the server on every 35s refresh.
+			// Backend refreshes continuously; frontend can poll cache more frequently.
+			const TTL_MS = 35_000;
+			const API_PER_TTL_MS = 35_000;
+			const API_BROKER_TTL_MS = 35_000;
+			const PENDING_RETRY_MS = 12_000;
+			const FAIL_BASE_BACKOFF_MS = 4_000;
+				while (targetsQueue.size > 0) {
+					// 시장/필터 전환으로 epoch가 바뀌면 현재 워커는 즉시 종료
+					if (workerEpoch !== targetsEpoch) return;
+				const now = Date.now();
+				const eligible = Array.from(targetsQueue)
+					.filter((c) => (targetsNextFetchAtMs.get(c) || 0) <= now);
+				if (eligible.length === 0) {
+					// wait until the nearest next fetch time
+					let minAt = Infinity;
+					for (const at of targetsNextFetchAtMs.values()) {
+						if (Number.isFinite(at) && at < minAt) minAt = at;
+					}
+					const sleepMs = Number.isFinite(minAt) ? Math.max(50, Math.min(2_000, minAt - Date.now())) : 200;
+					await new Promise(r2 => setTimeout(r2, sleepMs));
+					continue;
+				}
+				const batch = eligible.slice(0, 80);
+				for (const c of batch) targetsQueue.delete(c);
+				const needed = batch.filter((c) => {
+					const entry = targetsByCode.get(c);
+					if (!entry) return true;
+					// 값이 하나도 없는 경우엔 빠르게 재시도(백엔드 SWR/큐 채우기)
+					if (!isTargetsEntryComplete(entry)) {
+						return (now - (entry.fetchedAtMs || 0)) > PENDING_RETRY_MS;
+					}
+					return (now - (entry.fetchedAtMs || 0)) > TTL_MS;
+				});
+				if (needed.length === 0) continue;
+				// pending/미완료 종목은 백엔드 큐에 작업을 넣을 수 있게 cacheOnly=0로 호출합니다.
+				// (완료된 종목은 cacheOnly=1로 가볍게 폴링)
+				const shouldEnqueueRefresh = needed.some((c) => {
+					const entry = targetsByCode.get(c) || null;
+					if (!entry) return true;
+					const pending = Array.isArray(entry.pending) ? entry.pending : [];
+					// pending이 있으면 cacheOnly=0로 호출해 백엔드 큐를 트리거
+					return pending.includes('per') || pending.includes('brokers');
+				});
+				const cacheOnly = shouldEnqueueRefresh ? 0 : 1;
+				const url = `/api/targets?codes=${encodeURIComponent(needed.join(','))}&withPerPbr=1&withBrokers=1&cacheOnly=${cacheOnly}&apiPerTtlMs=${encodeURIComponent(API_PER_TTL_MS)}&apiBrokerTtlMs=${encodeURIComponent(API_BROKER_TTL_MS)}`;
+				let r;
+				let j;
+					try {
+					({ r, j } = await fetchJsonWithTimeout(url, 18_000));
+				} catch {
+						if (workerEpoch !== targetsEpoch) return;
+					// requeue with backoff
+					for (const c of needed) {
+						targetsQueue.add(c);
+						const prev = targetsRetryCountByCode.get(c) || 0;
+						const nextCount = Math.min(prev + 1, 8);
+						targetsRetryCountByCode.set(c, nextCount);
+						const backoff = Math.min(60_000, FAIL_BASE_BACKOFF_MS * Math.pow(2.0, nextCount));
+						targetsNextFetchAtMs.set(c, Date.now() + backoff);
+					}
+					await new Promise(r2 => setTimeout(r2, 50));
+					continue;
+				}
+					if (workerEpoch !== targetsEpoch) return;
+					if (!r?.ok || j?.error) {
+					for (const c of needed) {
+						targetsQueue.add(c);
+						const prev = targetsRetryCountByCode.get(c) || 0;
+						const nextCount = Math.min(prev + 1, 8);
+						targetsRetryCountByCode.set(c, nextCount);
+						const backoff = Math.min(60_000, FAIL_BASE_BACKOFF_MS * Math.pow(2.0, nextCount));
+						targetsNextFetchAtMs.set(c, Date.now() + backoff);
+					}
+					continue;
+				}
+					const items = Array.isArray(j.items) ? j.items : [];
+				let changed = false;
+				const seenCodes = new Set();
+				for (const it of items) {
+						if (workerEpoch !== targetsEpoch) return;
+					const code = String(it?.code ?? '').padStart(6, '0');
+					if (!/^[0-9]{6}$/.test(code)) continue;
+					seenCodes.add(code);
+					const prev = targetsByCode.get(code) || null;
+					const next = {
+						code,
+						current_per: coalesceDefined(it?.current_per, prev?.current_per ?? null),
+						target_prc: coalesceDefined(it?.target_prc, prev?.target_prc ?? null),
+						target_prc_pbr: coalesceDefined(it?.target_prc_pbr, prev?.target_prc_pbr ?? null),
+						kb_tp: coalesceDefined(it?.kb_tp, prev?.kb_tp ?? null),
+						nh_tp: coalesceDefined(it?.nh_tp, prev?.nh_tp ?? null),
+						kis_tp: coalesceDefined(it?.kis_tp, prev?.kis_tp ?? null),
+						pending: Array.isArray(it?.pending) ? it.pending.slice() : (Array.isArray(prev?.pending) ? prev.pending.slice() : []),
+						fetchedAtMs: Date.now(),
+					};
+					targetsByCode.set(code, next);
+					if (!prev) changed = true;
+					else {
+						const keys = ['current_per', 'target_prc', 'kb_tp', 'nh_tp', 'kis_tp'];
+						if (keys.some(k => String(prev?.[k] ?? '') !== String(next?.[k] ?? ''))) changed = true;
+					}
+
+					// 백엔드가 pending(큐 작업중)을 알려주면 짧은 간격으로 재시도
+					const pending = Array.isArray(it?.pending) ? it.pending : [];
+					if (pending.length > 0 && (pending.includes('per') || pending.includes('brokers'))) {
+						const prevCnt = targetsRetryCountByCode.get(code) || 0;
+						const nextCnt = Math.min(prevCnt + 1, 10);
+						targetsRetryCountByCode.set(code, nextCnt);
+						// pending은 "서버가 아직 처리중"일 가능성이 커서, 재시도는 천천히
+						const step = Math.min(8, Math.max(1, Math.ceil(nextCnt / 2)));
+						const cool = Math.min(120_000, PENDING_RETRY_MS * step);
+						targetsNextFetchAtMs.set(code, Date.now() + cool);
+						targetsQueue.add(code);
+					} else {
+						// 성공 응답이면 실패 카운트 초기화
+						targetsRetryCountByCode.set(code, 0);
+						targetsNextFetchAtMs.set(code, 0);
+					}
+				}
+
+					if (workerEpoch !== targetsEpoch) return;
+					// 응답에 없는 코드는 잠깐 후 재시도(네트워크/서버 이슈)
+				for (const c of needed) {
+					if (seenCodes.has(c)) continue;
+					targetsQueue.add(c);
+					const prev = targetsRetryCountByCode.get(c) || 0;
+					const nextCount = Math.min(prev + 1, 8);
+					targetsRetryCountByCode.set(c, nextCount);
+					targetsNextFetchAtMs.set(c, Date.now() + Math.min(60_000, FAIL_BASE_BACKOFF_MS * Math.pow(2.0, nextCount)));
+				}
+					if (changed) renderTable();
+				await new Promise(r2 => setTimeout(r2, 10));
+			}
+		}
+
+		async function loadTargetsForCodes(codes) {
+			enqueueTargetsCodes(codes);
+			return startTargetsWorkerIfNeeded();
+		}
+
+		let refreshTimer = null;
+		function getMarketFilterLabelKor() {
+			switch (String(MARKET_FILTER || 'all')) {
+				case 'kospi': return '코스피';
+				case 'kosdaq': return '코스닥';
+				default: return '모두';
+			}
+		}
+		async function update() {
+			if (busy) {
+				pendingRefresh = true;
+				const statusEl = document.getElementById('status');
+				if (statusEl && !String(statusEl.textContent || '').includes('갱신중')) {
+					statusEl.textContent = '갱신 대기중...';
+				}
+				return;
+			}
+			setControlsBusy(true);
+			try {
+				document.getElementById('status').textContent = '갱신중...';
+				const [items] = await Promise.all([
+					fetchDecliners(),
+					refreshBasisSnapshot().catch(() => null),
+				]);
+				latestItems = items;
+				document.getElementById('rangeTitle').textContent = `전일대비 ${MIN_PCT}% ~ ${MAX_PCT}% (${MARKET_FILTER})`;
+				renderTable();
+				updateSortHeaderLabels();
+				const fetchedCount = Array.isArray(items) ? items.length : 0;
+				const visibleCount = getOrderedDisplayItems().length;
+				const orderedUniverse = getOrderedUniverseItems();
+				const visibleItems = orderedUniverse.slice(0, Math.max(0, Number(DISPLAY_LIMIT) || 0));
+				const restItems = orderedUniverse.slice(Math.max(0, Number(DISPLAY_LIMIT) || 0), Math.max(0, Number(FETCH_LIMIT) || 0));
+				const visibleCodes = pickUniqueCodesFromItems(visibleItems);
+				const restCodes = pickUniqueCodesFromItems(restItems);
+				loadTargetsForCodes(visibleCodes).catch(() => {});
+				loadForeignFlowsForCodes(visibleCodes).catch(() => {});
+				loadMaSignalsForCodes(visibleCodes).catch(() => {});
+				loadSidewaysForCodes(visibleCodes).catch(() => {});
+				startBackgroundEnrichment(restCodes);
+				const hint = (visibleCount === 0 && fetchedCount > 0)
+					? ' (검색/basket 필터로 0개일 수 있음)'
+					: '';
+				const marketLabel = getMarketFilterLabelKor();
+				document.getElementById('status').textContent = `갱신: ${new Date().toLocaleTimeString()} (${marketLabel} ${visibleCount}/${fetchedCount})${hint}`;
+			} catch (e) {
+				document.getElementById('status').textContent = `API 오류: ${e?.message || String(e)}`;
+			} finally {
+				setControlsBusy(false);
+				if (pendingRefresh) {
+					pendingRefresh = false;
+					requestImmediateRefresh();
+				}
+			}
+		}
+
+		function requestImmediateRefresh() {
+			if (refreshTimer) clearTimeout(refreshTimer);
+			refreshTimer = setTimeout(() => update(), 50);
+		}
+
+		function setUsCpiModalVisible(visible) {
+			usCpiModalOpen = !!visible;
+			const overlay = document.getElementById('usCpiModalOverlay');
+			if (!overlay) return;
+			overlay.classList.toggle('open', usCpiModalOpen);
+			overlay.setAttribute('aria-hidden', usCpiModalOpen ? 'false' : 'true');
+			if (!usCpiModalOpen) {
+				try { overlay.querySelector('.modalBody')?.scrollTo?.({ top: 0 }); } catch {}
+				if (usCpiChart) { try { usCpiChart.destroy(); } catch {} usCpiChart = null; }
+				resetModalChartCanvas('usCpiChart', { height: 360 });
+			}
+		}
+
+		function setUsRateModalVisible(visible) {
+			usRateModalOpen = !!visible;
+			const overlay = document.getElementById('usRateModalOverlay');
+			if (!overlay) return;
+			overlay.classList.toggle('open', usRateModalOpen);
+			overlay.setAttribute('aria-hidden', usRateModalOpen ? 'false' : 'true');
+			if (!usRateModalOpen) {
+				try { overlay.querySelector('.modalBody')?.scrollTo?.({ top: 0 }); } catch {}
+				if (usRateChart) { try { usRateChart.destroy(); } catch {} usRateChart = null; }
+				resetModalChartCanvas('usRateChart', { height: 360 });
+			}
+		}
+
+		function setVixModalVisible(visible) {
+			vixModalOpen = !!visible;
+			const overlay = document.getElementById('vixModalOverlay');
+			if (!overlay) return;
+			overlay.classList.toggle('open', vixModalOpen);
+			overlay.setAttribute('aria-hidden', vixModalOpen ? 'false' : 'true');
+			if (!vixModalOpen) {
+				try { overlay.querySelector('.modalBody')?.scrollTo?.({ top: 0 }); } catch {}
+				if (vixChart) { try { vixChart.destroy(); } catch {} vixChart = null; }
+				resetModalChartCanvas('vixChart', { height: 360 });
+			}
+		}
+
+		function resetModalChartCanvas(canvasId, { height = 360 } = {}) {
+			const canvas = document.getElementById(canvasId);
+			if (!canvas) return;
+			const h = canvas.__rmbCrosshairHandlers;
+			if (h) {
+				try { canvas.removeEventListener('pointerdown', h.onPointerDown); } catch {}
+				try { canvas.removeEventListener('pointermove', h.onPointerMove); } catch {}
+				try { canvas.removeEventListener('pointerup', h.onPointerUp); } catch {}
+				try { canvas.removeEventListener('pointercancel', h.onPointerCancel); } catch {}
+				try { canvas.removeEventListener('pointerleave', h.onPointerLeave); } catch {}
+				try { canvas.removeEventListener('mousedown', h.onMouseDown); } catch {}
+				try { canvas.removeEventListener('mousemove', h.onMouseMove); } catch {}
+				try { window.removeEventListener('mouseup', h.onMouseUp); } catch {}
+				try { canvas.removeEventListener('mouseleave', h.onMouseLeave); } catch {}
+				try { delete canvas.__rmbCrosshairHandlers; } catch { canvas.__rmbCrosshairHandlers = null; }
+			}
+			try { canvas.style.width = '100%'; } catch {}
+			try { canvas.style.height = `${Number(height) || 360}px`; } catch {}
+			try { canvas.setAttribute('height', String(Number(height) || 360)); } catch {}
+			// width는 Chart.js가 부모 기준으로 다시 계산하게 둡니다.
+			try { canvas.removeAttribute('width'); } catch {}
+		}
+
+		function buildAlignedSeries(points, { getLabel, getValue } = {}) {
+			const labels = [];
+			const values = [];
+			for (const p of (points || [])) {
+				const label = String(getLabel?.(p) ?? '').trim();
+				const value = Number(getValue?.(p));
+				if (!label) continue;
+				if (!Number.isFinite(value)) continue;
+				labels.push(label);
+				values.push(value);
+			}
+			return { labels, values };
+		}
+
+		function scheduleChartResize(chart) {
+			if (!chart) return;
+			try {
+				requestAnimationFrame(() => {
+					try { chart.resize(); } catch {}
+					try { chart.update('none'); } catch {}
+					requestAnimationFrame(() => {
+						try { chart.resize(); } catch {}
+						try { chart.update('none'); } catch {}
+					});
+				});
+			} catch {
+				// ignore
+			}
+		}
+
+		function createRmbCrosshairPlugin() {
+			return {
+				id: 'crosshairRmbPlugin',
+				afterDraw(chart) {
+					const st = chart?.$rmbCrosshair;
+					if (!st?.active || !Number.isFinite(st.x) || !Number.isFinite(st.y)) return;
+					const ca = chart.chartArea;
+					if (!ca) return;
+					const x = Math.max(ca.left, Math.min(ca.right, st.x));
+					const y = Math.max(ca.top, Math.min(ca.bottom, st.y));
+
+					const rootStyle = getComputedStyle(document.documentElement);
+					const textColor = (rootStyle.getPropertyValue('--text') || 'rgba(240,244,255,.92)').trim();
+					const mutedColor = (rootStyle.getPropertyValue('--muted') || 'rgba(240,244,255,.70)').trim();
+					const panelColor = (rootStyle.getPropertyValue('--panel') || 'rgba(18, 24, 40, .78)').trim();
+					const borderColor = (rootStyle.getPropertyValue('--border') || 'rgba(255, 255, 255, .10)').trim();
+
+					const ctx2 = chart.ctx;
+					ctx2.save();
+					ctx2.lineWidth = 1;
+					ctx2.setLineDash([]);
+					ctx2.strokeStyle = mutedColor;
+					ctx2.beginPath();
+					ctx2.moveTo(x, ca.top);
+					ctx2.lineTo(x, ca.bottom);
+					ctx2.moveTo(ca.left, y);
+					ctx2.lineTo(ca.right, y);
+					ctx2.stroke();
+
+					const padX = 6;
+					const padY = 4;
+					const fontSize = 12;
+					ctx2.font = `${fontSize}px system-ui, Segoe UI, Apple SD Gothic Neo, Malgun Gothic, sans-serif`;
+					ctx2.textBaseline = 'middle';
+					ctx2.textAlign = 'left';
+					ctx2.fillStyle = textColor;
+					ctx2.strokeStyle = borderColor;
+
+					const xText = String(st.xLabel ?? '');
+					const yText = (st.yValueText != null) ? String(st.yValueText) : '';
+
+					// x label (bottom)
+					if (xText) {
+						const tw = ctx2.measureText(xText).width;
+						const bw = Math.ceil(tw + padX * 2);
+						const bh = fontSize + padY * 2;
+						let bx = Math.round(x - bw / 2);
+						bx = Math.max(ca.left, Math.min(ca.right - bw, bx));
+						const by = Math.round(ca.bottom - bh);
+						ctx2.fillStyle = panelColor;
+						ctx2.fillRect(bx, by, bw, bh);
+						ctx2.strokeRect(bx, by, bw, bh);
+						ctx2.fillStyle = textColor;
+						ctx2.fillText(xText, bx + padX, by + bh / 2);
+					}
+
+					// y label (right)
+					if (yText) {
+						const tw = ctx2.measureText(yText).width;
+						const bw = Math.ceil(tw + padX * 2);
+						const bh = fontSize + padY * 2;
+						const bx = Math.round(ca.right - bw);
+						let by = Math.round(y - bh / 2);
+						by = Math.max(ca.top, Math.min(ca.bottom - bh, by));
+						ctx2.fillStyle = panelColor;
+						ctx2.fillRect(bx, by, bw, bh);
+						ctx2.strokeRect(bx, by, bw, bh);
+						ctx2.fillStyle = textColor;
+						ctx2.fillText(yText, bx + padX, by + bh / 2);
+					}
+
+					ctx2.restore();
+				},
+			};
+		}
+
+		function enableRmbCrosshair(chart, { labels, yDecimals = 2, ySuffix = '' } = {}) {
+			if (!chart || !chart.canvas) return;
+			const canvas = chart.canvas;
+			// 좌클릭 드래그로 십자선 표시: 기본 컨텍스트 메뉴 제어는 불필요
+			try { canvas.style.touchAction = 'none'; } catch {}
+
+			// remove old handlers on this canvas
+			if (canvas.__rmbCrosshairHandlers) {
+				const h = canvas.__rmbCrosshairHandlers;
+				try { canvas.removeEventListener('pointerdown', h.onPointerDown); } catch {}
+				try { canvas.removeEventListener('pointermove', h.onPointerMove); } catch {}
+				try { canvas.removeEventListener('pointerup', h.onPointerUp); } catch {}
+				try { canvas.removeEventListener('pointercancel', h.onPointerCancel); } catch {}
+				try { canvas.removeEventListener('pointerleave', h.onPointerLeave); } catch {}
+				try { canvas.removeEventListener('mousedown', h.onMouseDown); } catch {}
+				try { canvas.removeEventListener('mousemove', h.onMouseMove); } catch {}
+				try { window.removeEventListener('mouseup', h.onMouseUp); } catch {}
+				try { canvas.removeEventListener('mouseleave', h.onMouseLeave); } catch {}
+			}
+
+			chart.$rmbCrosshair = { active: false, x: NaN, y: NaN, xLabel: '', yValueText: '', labels: Array.isArray(labels) ? labels : [], yDecimals, ySuffix };
+
+			const updateCrosshairFromEvent = (evt) => {
+				// 125% 배율(줌/DPR)에서도 정확도를 확보하기 위해 Chart.js의 좌표 변환을 우선 사용합니다.
+				let px;
+				let py;
+				const relPos = (() => {
+					const helper = window.Chart?.helpers?.getRelativePosition;
+					if (typeof helper !== 'function') return null;
+					try { return helper(evt, chart); } catch { return null; }
+				})();
+				if (relPos && Number.isFinite(relPos.x) && Number.isFinite(relPos.y)) {
+					px = relPos.x;
+					py = relPos.y;
+				} else {
+					const rect = canvas.getBoundingClientRect();
+					// DOM(CSS) 픽셀 -> 캔버스(디바이스) 픽셀로 변환해야 스케일/포인트가 정확합니다.
+					const rw = Math.max(1, rect.width);
+					const rh = Math.max(1, rect.height);
+					const sx = canvas.width / rw;
+					const sy = canvas.height / rh;
+					px = (evt.clientX - rect.left) * sx;
+					py = (evt.clientY - rect.top) * sy;
+				}
+				const ca = chart.chartArea;
+				if (!ca) return;
+				const cx = Math.max(ca.left, Math.min(ca.right, px));
+				const cy = Math.max(ca.top, Math.min(ca.bottom, py));
+
+				const xScale = chart.scales?.x;
+				const yScale = chart.scales?.y;
+				let xLabel = '';
+				if (xScale) {
+					const raw = xScale.getValueForPixel(cx);
+					let idx = 0;
+					if (typeof raw === 'number' && Number.isFinite(raw)) {
+						idx = Math.round(raw);
+					} else if (typeof raw === 'string') {
+						const found = chart.$rmbCrosshair.labels.indexOf(raw);
+						idx = found >= 0 ? found : 0;
+					}
+					idx = Math.max(0, Math.min(chart.$rmbCrosshair.labels.length - 1, idx));
+					xLabel = chart.$rmbCrosshair.labels[idx] ?? '';
+				}
+				let yValueText = '';
+				if (yScale) {
+					const yVal = yScale.getValueForPixel(cy);
+					const num = Number(yVal);
+					if (Number.isFinite(num)) {
+						const dec = Number.isFinite(Number(chart.$rmbCrosshair.yDecimals)) ? Number(chart.$rmbCrosshair.yDecimals) : 2;
+						yValueText = num.toFixed(Math.max(0, Math.min(6, dec))) + String(chart.$rmbCrosshair.ySuffix || '');
+					}
+				}
+
+				chart.$rmbCrosshair.x = cx;
+				chart.$rmbCrosshair.y = cy;
+				chart.$rmbCrosshair.xLabel = xLabel;
+				chart.$rmbCrosshair.yValueText = yValueText;
+				chart.draw();
+			};
+
+			const isLmbHeld = (evt) => {
+				const buttons = Number(evt?.buttons);
+				return Number.isFinite(buttons) && (buttons & 1) === 1;
+			};
+
+			const onPointerDown = (evt) => {
+				if (!isLmbHeld(evt) && evt.button !== 0) return;
+				try { evt.preventDefault(); } catch {}
+				try { canvas.setPointerCapture?.(evt.pointerId); } catch {}
+				chart.$rmbCrosshair.active = true;
+				updateCrosshairFromEvent(evt);
+			};
+			const onPointerMove = (evt) => {
+				if (isLmbHeld(evt)) {
+					try { evt.preventDefault(); } catch {}
+					if (!chart.$rmbCrosshair.active) chart.$rmbCrosshair.active = true;
+					updateCrosshairFromEvent(evt);
+					return;
+				}
+				if (chart.$rmbCrosshair.active) {
+					chart.$rmbCrosshair.active = false;
+					chart.draw();
+				}
+			};
+			const endPointer = (evt) => {
+				if (!chart.$rmbCrosshair.active) return;
+				chart.$rmbCrosshair.active = false;
+				try { canvas.releasePointerCapture?.(evt.pointerId); } catch {}
+				chart.draw();
+			};
+			const onPointerUp = (evt) => endPointer(evt);
+			const onPointerCancel = (evt) => endPointer(evt);
+			const onPointerLeave = (evt) => endPointer(evt);
+
+			// Fallback mouse events (older browsers)
+			const onMouseDown = (evt) => {
+				if (evt.button !== 0) return;
+				try { evt.preventDefault(); } catch {}
+				chart.$rmbCrosshair.active = true;
+				updateCrosshairFromEvent(evt);
+			};
+			const onMouseMove = (evt) => {
+				if (!chart.$rmbCrosshair?.active) return;
+				updateCrosshairFromEvent(evt);
+			};
+			const onMouseUp = (evt) => {
+				if (evt.button !== 0) return;
+				chart.$rmbCrosshair.active = false;
+				chart.draw();
+			};
+			const onMouseLeave = () => {
+				chart.$rmbCrosshair.active = false;
+				chart.draw();
+			};
+
+			canvas.__rmbCrosshairHandlers = {
+				onPointerDown,
+				onPointerMove,
+				onPointerUp,
+				onPointerCancel,
+				onPointerLeave,
+				onMouseDown,
+				onMouseMove,
+				onMouseUp,
+				onMouseLeave,
+			};
+
+			canvas.addEventListener('pointerdown', onPointerDown);
+			canvas.addEventListener('pointermove', onPointerMove);
+			canvas.addEventListener('pointerup', onPointerUp);
+			canvas.addEventListener('pointercancel', onPointerCancel);
+			canvas.addEventListener('pointerleave', onPointerLeave);
+			canvas.addEventListener('mousedown', onMouseDown);
+			canvas.addEventListener('mousemove', onMouseMove);
+			window.addEventListener('mouseup', onMouseUp);
+			canvas.addEventListener('mouseleave', onMouseLeave);
+		}
+
+		async function openUsCpiModal() {
+			setUsCpiModalVisible(true);
+			const hint = document.getElementById('usCpiHint');
+			if (hint) hint.textContent = '로딩 중...';
+			try {
+				const r = await fetch('/api/us-cpi');
+				const j = await r.json().catch(() => ({}));
+				if (!r.ok || j?.error) throw new Error(j?.error || `HTTP ${r.status}`);
+				const points = Array.isArray(j.items) ? j.items : (Array.isArray(j.data) ? j.data : []);
+				const series = buildAlignedSeries(points, {
+					getLabel: (p) => (p?.date || p?.month || ''),
+					getValue: (p) => (p?.yoyPct ?? p?.yoy ?? p?.value),
+				});
+				const labels = series.labels;
+				const values = series.values;
+				const ctx = document.getElementById('usCpiChart')?.getContext?.('2d');
+				if (ctx && window.Chart) {
+					if (usCpiChart) { try { usCpiChart.destroy(); } catch {} usCpiChart = null; }
+					usCpiChart = new Chart(ctx, {
+						type: 'line',
+						data: {
+							labels,
+							datasets: [{ label: 'CPI YoY(%)', data: values, borderWidth: 2, pointRadius: 2, tension: 0.25 }]
+						},
+						options: {
+							responsive: true,
+							maintainAspectRatio: false,
+							plugins: { legend: { display: false } },
+							scales: { y: { ticks: { callback: (v) => `${v}%` } } }
+						},
+						plugins: [createRmbCrosshairPlugin()],
+					});
+					scheduleChartResize(usCpiChart);
+					enableRmbCrosshair(usCpiChart, { labels, yDecimals: 2, ySuffix: '%' });
+					if (hint) hint.textContent = j.updatedAt ? `갱신: ${new Date(j.updatedAt).toLocaleString()}` : '';
+				} else {
+					if (hint) hint.textContent = 'Chart.js 로드 실패';
+				}
+			} catch (e) {
+				if (hint) hint.textContent = `조회 실패: ${e?.message || String(e)}`;
+			}
+		}
+
+		async function openUsRateModal() {
+			setUsRateModalVisible(true);
+			const hint = document.getElementById('usRateHint');
+			if (hint) hint.textContent = '로딩 중...';
+			try {
+				const r = await fetch('/api/fedfunds-series?days=365');
+				const j = await r.json().catch(() => ({}));
+				if (!r.ok || j?.error) throw new Error(j?.error || `HTTP ${r.status}`);
+				const points = Array.isArray(j.items) ? j.items : [];
+				const series = buildAlignedSeries(points, {
+					getLabel: (p) => (p?.date || ''),
+					getValue: (p) => p?.value,
+				});
+				const labels = series.labels;
+				const values = series.values;
+				const ctx = document.getElementById('usRateChart')?.getContext?.('2d');
+				if (ctx && window.Chart) {
+					if (usRateChart) { try { usRateChart.destroy(); } catch {} usRateChart = null; }
+					usRateChart = new Chart(ctx, {
+						type: 'line',
+						data: {
+							labels,
+							datasets: [{ label: '미국 기준금리(%)', data: values, borderWidth: 2, pointRadius: 1, tension: 0.25 }]
+						},
+						options: {
+							responsive: true,
+							maintainAspectRatio: false,
+							plugins: { legend: { display: false } },
+							scales: { y: { ticks: { callback: (v) => `${v}%` } } }
+						},
+						plugins: [createRmbCrosshairPlugin()],
+					});
+					scheduleChartResize(usRateChart);
+					enableRmbCrosshair(usRateChart, { labels, yDecimals: 3, ySuffix: '%' });
+					if (hint) hint.textContent = j.updatedAt ? `갱신: ${new Date(j.updatedAt).toLocaleString()}` : '';
+				} else {
+					if (hint) hint.textContent = 'Chart.js 로드 실패';
+				}
+			} catch (e) {
+				if (hint) hint.textContent = `조회 실패: ${e?.message || String(e)}`;
+			}
+		}
+
+		async function openVixModal() {
+			setVixModalVisible(true);
+			const hint = document.getElementById('vixHint');
+			if (hint) hint.textContent = '로딩 중...';
+			try {
+				const r = await fetch('/api/vix-series?days=1095');
+				const j = await r.json().catch(() => ({}));
+				if (!r.ok || j?.error) throw new Error(j?.error || `HTTP ${r.status}`);
+				const points = Array.isArray(j.items) ? j.items : [];
+				const series = buildAlignedSeries(points, {
+					getLabel: (p) => (p?.date || ''),
+					getValue: (p) => p?.value,
+				});
+				const labels = series.labels;
+				const values = series.values;
+				const ctx = document.getElementById('vixChart')?.getContext?.('2d');
+				if (ctx && window.Chart) {
+					if (vixChart) { try { vixChart.destroy(); } catch {} vixChart = null; }
+					vixChart = new Chart(ctx, {
+						type: 'line',
+						data: {
+							labels,
+							datasets: [{ label: 'VIX(일별)', data: values, borderWidth: 2, pointRadius: 0, tension: 0.15 }]
+						},
+						options: {
+							responsive: true,
+							maintainAspectRatio: false,
+							plugins: { legend: { display: false } },
+							scales: {
+								x: { ticks: { autoSkip: true, maxRotation: 0 } },
+								y: { ticks: { callback: (v) => `${v}` } }
+							}
+						},
+						plugins: [createRmbCrosshairPlugin()],
+					});
+					scheduleChartResize(vixChart);
+					enableRmbCrosshair(vixChart, { labels, yDecimals: 2, ySuffix: '' });
+
+					if (hint) {
+						const updated = j.updatedAt ? `갱신: ${new Date(j.updatedAt).toLocaleString()}` : '';
+						hint.textContent = updated ? `${updated} (일별)` : '일별';
+					}
+				} else {
+					if (hint) hint.textContent = 'Chart.js 로드 실패';
+				}
+			} catch (e) {
+				if (hint) hint.textContent = `조회 실패: ${e?.message || String(e)}`;
+			}
+		}
+
+		// ===== Market deposit (investor deposit) =====
+		async function updateMarketDeposit() {
+			const el = document.getElementById('marketDepositText');
+			if (!el) return;
+			try {
+				const r = await fetch(withSidcode('/api/market-deposit'), { cache: 'no-store' });
+				const j = await r.json().catch(() => ({}));
+				if (!r.ok || j?.error) throw new Error(j?.error || `HTTP ${r.status}`);
+				el.textContent = String(j.display || '-');
+			} catch {
+				el.textContent = '-';
+			}
+		}
+
+		async function updateOilWti() {
+			const el = document.getElementById('oilWtiText');
+			if (!el) return;
+			try {
+				const r = await fetch(withSidcode('/api/oil'), { cache: 'no-store' });
+				const j = await r.json().catch(() => ({}));
+				if (!r.ok || j?.error) throw new Error(j?.error || `HTTP ${r.status}`);
+				const value = Number(j.value);
+				if (!Number.isFinite(value)) throw new Error('value 파싱 실패');
+				const change = Number(j.change);
+				const changeRatePct = Number(j.changeRatePct);
+				const base = `${value.toFixed(2)}$/bbl`;
+				let suffix = '';
+				if (Number.isFinite(change)) {
+					const sign = change > 0 ? '+' : '';
+					suffix = ` (${sign}${change.toFixed(2)}`;
+					if (Number.isFinite(changeRatePct)) {
+						const rateSign = changeRatePct > 0 ? '+' : '';
+						suffix += ` / ${rateSign}${changeRatePct.toFixed(2)}%`;
+					}
+					suffix += ')';
+				}
+				el.textContent = base + suffix;
+				el.classList.remove('up', 'down');
+				if (j.direction === 'up') el.classList.add('up');
+				else if (j.direction === 'down') el.classList.add('down');
+			} catch {
+				el.textContent = '-';
+				el.classList.remove('up', 'down');
+			}
+		}
+
+		function formatSigned(n, digits = 2) {
+			const num = Number(n);
+			if (!Number.isFinite(num)) return null;
+			const sign = num > 0 ? '+' : '';
+			return `${sign}${num.toFixed(digits)}`;
+		}
+
+		function formatSignedCompact(n, maxDigits = 2) {
+			const num = Number(n);
+			if (!Number.isFinite(num)) return null;
+			const rounded = Number(num.toFixed(maxDigits));
+			const sign = rounded > 0 ? '+' : '';
+			return `${sign}${rounded.toLocaleString('ko-KR', { maximumFractionDigits: maxDigits })}`;
+		}
+
+		function buildBasisSnapshot(spotPayload, futuresPayload) {
+			const spotValue = Number(spotPayload?.value);
+			const futuresValue = Number(futuresPayload?.value);
+			if (!Number.isFinite(spotValue) || !Number.isFinite(futuresValue)) return null;
+
+			const basis = futuresValue - spotValue;
+			const direction = basis > 0 ? 'up' : basis < 0 ? 'down' : 'flat';
+			const ruleLabel = basis > 0 ? '강세' : basis < 0 ? '약세' : '보합';
+			const basisText = formatSignedCompact(basis, 2) ?? '-';
+			return {
+				spotValue,
+				futuresValue,
+				basis,
+				basisText,
+				direction,
+				ruleLabel,
+				ruleText: `${ruleLabel}(${basisText})`,
+			};
+		}
+
+		async function refreshBasisSnapshot() {
+			const el = document.getElementById('basisText');
+			try {
+				const [spotRes, futuresRes] = await Promise.all([
+					fetch(withSidcode('/api/kospi200-spot'), { cache: 'no-store' }),
+					fetch(withSidcode('/api/kospi200-night-futures'), { cache: 'no-store' }),
+				]);
+				const spotJson = await spotRes.json().catch(() => ({}));
+				const futuresJson = await futuresRes.json().catch(() => ({}));
+				if (!spotRes.ok || spotJson?.error) throw new Error(spotJson?.error || `HTTP ${spotRes.status}`);
+				if (!futuresRes.ok || futuresJson?.error) throw new Error(futuresJson?.error || `HTTP ${futuresRes.status}`);
+				basisSnapshot = buildBasisSnapshot(spotJson, futuresJson);
+				if (el) {
+					el.textContent = basisSnapshot?.ruleText ?? '-';
+					setDirectionClass(el, basisSnapshot?.direction ?? 'flat');
+				}
+			} catch {
+				basisSnapshot = null;
+				if (el) {
+					el.textContent = '-';
+					setDirectionClass(el, 'flat');
+				}
+			}
+			if (Array.isArray(latestItems) && latestItems.length > 0) {
+				try { renderTable(); } catch {}
+			}
+			return basisSnapshot;
+		}
+
+		function setDirectionClass(el, direction) {
+			if (!el) return;
+			el.classList.remove('up', 'down');
+			if (direction === 'up') el.classList.add('up');
+			else if (direction === 'down') el.classList.add('down');
+		}
+
+		async function updateUsFuturesNq() {
+			const el = document.getElementById('usFuturesNqText');
+			if (!el) return;
+			try {
+				const r = await fetch(withSidcode('/api/us-futures/nq'), { cache: 'no-store' });
+				const j = await r.json().catch(() => ({}));
+				if (!r.ok || j?.error) throw new Error(j?.error || `HTTP ${r.status}`);
+				const value = Number(j.value);
+				if (!Number.isFinite(value)) throw new Error('value 파싱 실패');
+				const change = formatSigned(j.change, 2);
+				const rate = formatSigned(j.changeRatePct, 2);
+				const base = `${value.toFixed(2)}pt`;
+				const suffix = change ? ` (${change}${rate ? ` / ${rate}%` : ''})` : '';
+				el.textContent = base + suffix;
+				setDirectionClass(el, j.direction);
+			} catch {
+				el.textContent = '-';
+				setDirectionClass(el, 'flat');
+			}
+		}
+
+		async function updateUsFuturesEs() {
+			const el = document.getElementById('usFuturesEsText');
+			if (!el) return;
+			try {
+				const r = await fetch(withSidcode('/api/us-futures/es'), { cache: 'no-store' });
+				const j = await r.json().catch(() => ({}));
+				if (!r.ok || j?.error) throw new Error(j?.error || `HTTP ${r.status}`);
+				const value = Number(j.value);
+				if (!Number.isFinite(value)) throw new Error('value 파싱 실패');
+				const change = formatSigned(j.change, 2);
+				const rate = formatSigned(j.changeRatePct, 2);
+				const base = `${value.toFixed(2)}pt`;
+				const suffix = change ? ` (${change}${rate ? ` / ${rate}%` : ''})` : '';
+				el.textContent = base + suffix;
+				setDirectionClass(el, j.direction);
+			} catch {
+				el.textContent = '-';
+				setDirectionClass(el, 'flat');
+			}
+		}
+
+		async function updateUs10y() {
+			const el = document.getElementById('us10yText');
+			if (!el) return;
+			try {
+				const r = await fetch(withSidcode('/api/us10y'), { cache: 'no-store' });
+				const j = await r.json().catch(() => ({}));
+				if (!r.ok || j?.error) throw new Error(j?.error || `HTTP ${r.status}`);
+				const value = Number(j.value);
+				if (!Number.isFinite(value)) throw new Error('value 파싱 실패');
+				const changeNum = Number(j.change);
+				const prevNum = Number(j.previousValue);
+				const change = formatSigned(changeNum, 2);
+				let rate = null;
+				if (Number.isFinite(changeNum) && Number.isFinite(prevNum) && prevNum !== 0) {
+					rate = formatSigned((changeNum / prevNum) * 100, 2);
+				}
+				const base = `${value.toFixed(2)}%`;
+				const suffix = change ? ` (${change}${rate ? ` / ${rate}%` : ''})` : '';
+				el.textContent = base + suffix;
+				setDirectionClass(el, j.direction);
+			} catch {
+				el.textContent = '-';
+				setDirectionClass(el, 'flat');
+			}
+		}
+
+		async function updateUsdIndex() {
+			const el = document.getElementById('usdIndexText');
+			if (!el) return;
+			try {
+				const r = await fetch(withSidcode('/api/dxy'), { cache: 'no-store' });
+				const j = await r.json().catch(() => ({}));
+				if (!r.ok || j?.error) throw new Error(j?.error || `HTTP ${r.status}`);
+				const value = Number(j.value);
+				if (!Number.isFinite(value)) throw new Error('value 파싱 실패');
+				const change = formatSigned(j.change, 2);
+				const rate = formatSigned(j.changeRatePct, 2);
+				const base = `${value.toFixed(2)}pt`;
+				const suffix = change ? ` (${change}${rate ? ` / ${rate}%` : ''})` : '';
+				el.textContent = base + suffix;
+				setDirectionClass(el, j.direction);
+			} catch {
+				el.textContent = '-';
+				setDirectionClass(el, 'flat');
+			}
+		}
+
+		async function updateKospi200NightFutures() {
+			const el = document.getElementById('kospi200NightFuturesText');
+			if (!el) return;
+			try {
+				const r = await fetch(withSidcode('/api/kospi200-night-futures'), { cache: 'no-store' });
+				const j = await r.json().catch(() => ({}));
+				if (!r.ok || j?.error) throw new Error(j?.error || `HTTP ${r.status}`);
+				const value = Number(j.value);
+				if (!Number.isFinite(value)) throw new Error('value 파싱 실패');
+				const change = formatSigned(j.change, 2);
+				const rate = formatSigned(j.changeRatePct, 2);
+				const base = `${value.toFixed(2)}pt`;
+				const suffix = change ? ` (${change}${rate ? ` / ${rate}%` : ''})` : '';
+				el.textContent = base + suffix;
+				setDirectionClass(el, j.direction);
+			} catch {
+				el.textContent = '-';
+				setDirectionClass(el, 'flat');
+			}
+		}
+
+		function fearGreedClassificationToKo(value) {
+			const s = String(value ?? '').trim();
+			if (!s) return null;
+			const key = s.toLowerCase();
+			if (key === 'extreme fear') return '극도의 공포';
+			if (key === 'fear') return '공포';
+			if (key === 'neutral') return '중립';
+			if (key === 'greed') return '탐욕';
+			if (key === 'extreme greed') return '극도의 탐욕';
+			return s;
+		}
+
+		async function updateFearGreed() {
+			const el = document.getElementById('fearGreedText');
+			if (!el) return;
+			try {
+				const r = await fetch(withSidcode('/api/fear-greed'), { cache: 'no-store' });
+				const j = await r.json().catch(() => ({}));
+				if (!r.ok || j?.error) throw new Error(j?.error || `HTTP ${r.status}`);
+				const value = Number(j.value);
+				if (!Number.isFinite(value)) throw new Error('value 파싱 실패');
+				const cls = fearGreedClassificationToKo(j.classification);
+				const change = formatSigned(j.change, 1);
+				const base = `${value.toFixed(1)}`;
+				const parts = [];
+				if (cls) parts.push(cls);
+				if (change) parts.push(change);
+				const suffix = parts.length ? ` (${parts.join(' / ')})` : '';
+				el.textContent = base + suffix;
+				// 60 기준: 60 이하면 파란색(down), 60 초과는 붉은색(up)
+				setDirectionClass(el, value > 60 ? 'up' : 'down');
+			} catch {
+				el.textContent = '-';
+				setDirectionClass(el, 'flat');
+			}
+		}
+
+		function withSidcode(url) {
+			if (!url) return url;
+			const sep = url.includes('?') ? '&' : '?';
+			return `${url}${sep}sidcode=${Date.now()}`;
+		}
+
+		function setStockChartModalVisible(visible) {
+			stockChartModalOpen = !!visible;
+			const overlay = document.getElementById('stockChartModalOverlay');
+			if (!overlay) return;
+			overlay.classList.toggle('open', stockChartModalOpen);
+			overlay.setAttribute('aria-hidden', stockChartModalOpen ? 'false' : 'true');
+			if (!stockChartModalOpen) {
+				stockChartModalCode = '';
+				stockChartModalKind = 'day';
+				const sec = document.getElementById('stockChartModalOpProfitSection');
+				if (sec) sec.style.display = 'none';
+				const statsEl = document.getElementById('stockChartModalKeyStats');
+				if (statsEl) statsEl.textContent = '-';
+			}
+		}
+
+		async function loadStockChartModalOpProfits(code) {
+			const normalized = String(code ?? '').trim().padStart(6, '0');
+			if (!/^[0-9]{6}$/.test(normalized)) return;
+			const sec = document.getElementById('stockChartModalOpProfitSection');
+			const unitEl = document.getElementById('stockChartModalOpProfitUnit');
+			const statsEl = document.getElementById('stockChartModalKeyStats');
+			const contentEl = document.getElementById('stockChartModalOpProfitContent');
+			if (!sec || !contentEl) return;
+
+			sec.style.display = '';
+			if (unitEl) unitEl.textContent = '-';
+			if (statsEl) statsEl.textContent = '-';
+			contentEl.classList.add('muted');
+			contentEl.textContent = '로딩중...';
+
+			try {
+				const url = `/api/op-profits?codes=${encodeURIComponent(normalized)}`;
+				const r = await fetch(url, { cache: 'no-store' });
+				const j = await r.json().catch(() => ({}));
+				if (!r.ok || j?.error) throw new Error(j?.error || `HTTP ${r.status}`);
+				const item = Array.isArray(j.items) ? j.items[0] : null;
+				if (!item) throw new Error('데이터 없음');
+
+				const unit = String(item?.unit ?? '억원');
+				if (unitEl) unitEl.textContent = unit ? `단위: ${unit}` : '-';
+
+				// EPS/신용(%)은 KIS 시세 응답이 더 안정적이므로 우선 사용
+				let epsNum = Number(item?.eps);
+				let creditNum = Number(item?.creditRatioPct);
+				try {
+					const r2 = await fetch(`/api/price?code=${encodeURIComponent(normalized)}`, { cache: 'no-store' });
+					const j2 = await r2.json().catch(() => ({}));
+					if (r2.ok && !j2?.error) {
+						const epsKis = Number(j2?.eps);
+						if (Number.isFinite(epsKis)) epsNum = epsKis;
+						const creditKis = Number(j2?.whol_loan_rmnd_rate);
+						if (Number.isFinite(creditKis)) creditNum = creditKis;
+					}
+				} catch {}
+
+				const parts = [];
+				if (Number.isFinite(epsNum)) parts.push(`EPS: ${formatWon(epsNum)}`);
+				if (Number.isFinite(creditNum)) parts.push(`신용: ${formatPct(creditNum, 2)}`);
+				if (statsEl) statsEl.textContent = parts.length ? parts.join(' / ') : '-';
+
+				const y1 = Number(item?.lastYear);
+				const y2 = Number(item?.prevYear);
+				const y3 = Number(item?.thirdYear);
+				const rows = [
+					{ year: y1, value: item?.opProfitLastYear },
+					{ year: y2, value: item?.opProfitPrevYear },
+					{ year: y3, value: item?.opProfitThirdYear },
+				].filter(r2 => Number.isFinite(r2.year));
+
+				// 최신 연도가 위로 오도록 정렬
+				rows.sort((a, b) => b.year - a.year);
+
+				const html = [
+					'<table class="opProfitTable">',
+					'<thead><tr><th>연도</th><th class="right">영업이익</th></tr></thead>',
+					'<tbody>',
+					...rows.map(rr => {
+						const v = formatMaybeInt(rr.value);
+						return `<tr><th scope="row">${rr.year}</th><td class="right">${v}</td></tr>`;
+					}),
+					'</tbody></table>',
+				].join('');
+
+				contentEl.classList.remove('muted');
+				contentEl.innerHTML = html;
+			} catch (e) {
+				if (statsEl) statsEl.textContent = '-';
+				contentEl.classList.add('muted');
+				contentEl.textContent = `영업이익 로드 실패: ${e?.message || String(e)}`;
+			}
+		}
+
+		function setStockChartModalKind(kind) {
+			if (!['day', 'week', 'month'].includes(kind)) kind = 'day';
+			stockChartModalKind = kind;
+			document.querySelectorAll('#stockChartModalTabs .chartTab').forEach((b) => {
+				b.classList.toggle('active', b.dataset.kind === kind);
+			});
+			const img = document.getElementById('stockChartModalImg');
+			if (!img) return;
+			const code = String(stockChartModalCode || '').padStart(6, '0');
+			const url = `https://ssl.pstatic.net/imgfinance/chart/item/candle/${kind}/${code}.png`;
+			img.src = withSidcode(url);
+		}
+
+		function openStockChartModal(code, name) {
+			const normalized = String(code ?? '').trim().padStart(6, '0');
+			if (!/^[0-9]{6}$/.test(normalized)) return;
+			stockChartModalCode = normalized;
+			const titleEl = document.getElementById('stockChartModalTitle');
+			if (titleEl) titleEl.textContent = `${String(name ?? '').trim() ? String(name ?? '').trim() + ' ' : ''}차트 (${normalized})`;
+			const linkEl = document.getElementById('stockChartModalNaverLink');
+			if (linkEl) linkEl.href = `https://finance.naver.com/item/main.naver?code=${normalized}`;
+			setStockChartModalVisible(true);
+			setStockChartModalKind('day');
+			loadStockChartModalOpProfits(normalized).catch(() => {});
+		}
+
+		document.getElementById('applyRangeBtn')?.addEventListener('click', () => {
+			const minV = parseNumber(document.getElementById('minPctInput')?.value);
+			const maxV = parseNumber(document.getElementById('maxPctInput')?.value);
+			const normalized = normalizeRangePct(minV, maxV);
+			if (!normalized) return;
+			MIN_PCT = normalized.minPct;
+			MAX_PCT = normalized.maxPct;
+			saveRangePctToStorage(MIN_PCT, MAX_PCT);
+			syncRangeSelectValuesFromState();
+			resetEnrichmentQueuesAndBackground();
+			requestImmediateRefresh();
+		});
+		document.getElementById('marketKospiBtn')?.addEventListener('click', () => setMarket('kospi'));
+		document.getElementById('marketKosdaqBtn')?.addEventListener('click', () => setMarket('kosdaq'));
+		document.getElementById('marketAllBtn')?.addEventListener('click', () => setMarket('all'));
+		document.getElementById('usCpiBtn')?.addEventListener('click', () => openUsCpiModal());
+		document.getElementById('usRateBtn')?.addEventListener('click', () => openUsRateModal());
+		document.getElementById('vixBtn')?.addEventListener('click', () => openVixModal());
+		document.getElementById('stockSearchBtn')?.addEventListener('click', () => renderTable());
+		document.getElementById('favoritesBtn')?.addEventListener('click', () => setFavoritesModalVisible(true));
+		document.getElementById('sectorBtn')?.addEventListener('click', () => setSectorModalVisible(true));
+		document.getElementById('stockSearchInput')?.addEventListener('keydown', (e) => {
+			if (e.key === 'Enter') { e.preventDefault(); renderTable(); }
+		});
+		document.getElementById('saveBtn')?.addEventListener('click', () => exportCheckedRowsToExcel());
+		document.getElementById('basketBtn')?.addEventListener('click', () => setBasketModalVisible(true));
+		const displayLimitInputEl = document.getElementById('displayLimitInput');
+		if (displayLimitInputEl) displayLimitInputEl.value = String(DISPLAY_LIMIT);
+		function applyDisplayLimitFromInput() {
+			const raw = parseNumber(displayLimitInputEl?.value);
+			if (!Number.isFinite(raw)) return;
+			const next = Math.max(1, Math.min(2000, Math.round(raw)));
+			DISPLAY_LIMIT = next;
+			try { localStorage.setItem(DISPLAY_LIMIT_STORAGE_KEY, String(DISPLAY_LIMIT)); } catch {}
+			// 표시 개수가 FETCH_LIMIT보다 크면, 조회 개수도 함께 늘려야 실제 표시가 가능합니다.
+			if (DISPLAY_LIMIT > FETCH_LIMIT) FETCH_LIMIT = DISPLAY_LIMIT;
+			resetEnrichmentQueuesAndBackground();
+			requestImmediateRefresh();
+		}
+		document.getElementById('displayLimitSearchBtn')?.addEventListener('click', () => applyDisplayLimitFromInput());
+		displayLimitInputEl?.addEventListener('keydown', (e) => {
+			if (e.key === 'Enter') { e.preventDefault(); applyDisplayLimitFromInput(); }
+		});
+		document.querySelector('#stockTable thead')?.addEventListener('click', (e) => {
+			const th = e.target?.closest?.('th');
+			const key = th?.dataset?.sortKey;
+			if (!key) return;
+			setSort(key);
+		});
+		document.querySelector('#stockTable tbody')?.addEventListener('change', (e) => {
+			const cb = e.target?.closest?.('input.stockCheckbox');
+			if (!cb) return;
+			const code = String(cb.dataset?.code ?? '').trim().padStart(6, '0');
+			if (!/^[0-9]{6}$/.test(code)) return;
+			if (cb.checked) selectedCodes.add(code);
+			else selectedCodes.delete(code);
+			if (!selectedCodes.has(code)) favoritesPendingDeleteCodes.delete(code);
+			if (favoritesModalOpen) {
+				const myEpoch = favoritesModalEpoch;
+				try { renderFavoritesModal(); } catch {}
+				ensureFavoritesSnapshotsLoaded(Array.from(selectedCodes))
+					.then(() => {
+						if (favoritesModalOpen && favoritesModalEpoch === myEpoch) {
+							try { renderFavoritesModal(); } catch {}
+						}
+					})
+					.catch(() => {});
+			}
+		});
+		document.querySelector('#stockTable tbody')?.addEventListener('click', (e) => {
+			if (e.target?.closest?.('input.stockCheckbox, label.stockPick')) return;
+			const tr = e.target?.closest?.('tr');
+			if (!tr) return;
+			const name = tr.cells?.[0]?.textContent ?? '';
+			openStockChartModal(tr.dataset.code, name);
+		});
+
+		document.getElementById('usCpiModalCloseBtn')?.addEventListener('click', () => setUsCpiModalVisible(false));
+		document.getElementById('usCpiModalOverlay')?.addEventListener('click', (e) => {
+			if (e.target?.id === 'usCpiModalOverlay') setUsCpiModalVisible(false);
+		});
+		document.getElementById('usRateModalCloseBtn')?.addEventListener('click', () => setUsRateModalVisible(false));
+		document.getElementById('usRateModalOverlay')?.addEventListener('click', (e) => {
+			if (e.target?.id === 'usRateModalOverlay') setUsRateModalVisible(false);
+		});
+		document.getElementById('vixModalCloseBtn')?.addEventListener('click', () => setVixModalVisible(false));
+		document.getElementById('vixModalOverlay')?.addEventListener('click', (e) => {
+			if (e.target?.id === 'vixModalOverlay') setVixModalVisible(false);
+		});
+		document.getElementById('stockChartModalCloseBtn')?.addEventListener('click', () => setStockChartModalVisible(false));
+		document.getElementById('stockChartModalOverlay')?.addEventListener('click', (e) => {
+			if (e.target?.id === 'stockChartModalOverlay') setStockChartModalVisible(false);
+		});
+		document.getElementById('basketModalCloseBtn')?.addEventListener('click', () => setBasketModalVisible(false));
+		document.getElementById('basketModalOverlay')?.addEventListener('click', (e) => {
+			if (e.target?.id === 'basketModalOverlay') setBasketModalVisible(false);
+		});
+		document.getElementById('favoritesSaveBtn')?.addEventListener('click', async () => {
+			await saveFavoritesToServer();
+		});
+		document.getElementById('favoritesDeleteBtn')?.addEventListener('click', async () => {
+			const toDelete = Array.from(favoritesPendingDeleteCodes).filter((c) => /^[0-9]{6}$/.test(String(c || '')));
+			const hintEl = document.getElementById('favoritesModalHint');
+			if (toDelete.length === 0) {
+				if (hintEl) hintEl.textContent = '삭제할 종목을 체크해 주세요.';
+				return;
+			}
+			for (const c of toDelete) selectedCodes.delete(c);
+			favoritesPendingDeleteCodes.clear();
+			await persistFavoritesToServerWithHint('삭제 완료');
+			try { renderTable(); } catch {}
+			try { renderFavoritesModal(); } catch {}
+		});
+		document.getElementById('favoritesModalCloseBtn')?.addEventListener('click', () => setFavoritesModalVisible(false));
+		document.getElementById('favoritesModalOverlay')?.addEventListener('click', (e) => {
+			if (e.target?.id === 'favoritesModalOverlay') setFavoritesModalVisible(false);
+		});
+		document.getElementById('favoritesModalContent')?.addEventListener('change', (e) => {
+			const cb = e.target?.closest?.('input.favoritesDeleteCheckbox');
+			if (!cb) return;
+			const code = String(cb.dataset?.code ?? '').trim().padStart(6, '0');
+			if (!/^[0-9]{6}$/.test(code)) return;
+			if (cb.checked) favoritesPendingDeleteCodes.add(code);
+			else favoritesPendingDeleteCodes.delete(code);
+		});
+		document.getElementById('favoritesModalContent')?.addEventListener('dblclick', (e) => {
+			const tr = e.target?.closest?.('tr[data-code]');
+			if (!tr) return;
+			const code = String(tr.dataset?.code ?? '').trim().padStart(6, '0');
+			if (!/^[0-9]{6}$/.test(code)) return;
+			const input = document.getElementById('stockSearchInput');
+			if (input) input.value = code;
+			try { renderTable(); } catch {}
+			setFavoritesModalVisible(false);
+		});
+		document.getElementById('sectorModalCloseBtn')?.addEventListener('click', () => setSectorModalVisible(false));
+		document.getElementById('sectorModalOverlay')?.addEventListener('click', (e) => {
+			if (e.target?.id === 'sectorModalOverlay') setSectorModalVisible(false);
+		});
+		document.getElementById('sectorGrid')?.addEventListener('click', (e) => {
+			const btn = e.target?.closest?.('button.sectorCard');
+			if (!btn) return;
+			const key = String(btn.dataset?.sector ?? '').trim();
+			if (!key || !SECTOR_DEFS[key]) return;
+			SECTOR_FILTER = (SECTOR_FILTER === key) ? null : key;
+			const input = document.getElementById('stockSearchInput');
+			if (input) input.value = '';
+			setSectorModalVisible(false);
+			try { renderTable(); } catch {}
+		});
+		document.getElementById('basketClearBtn')?.addEventListener('click', () => {
+			basketActive = false;
+			basketCodes.clear();
+			const hint = document.getElementById('basketHintText');
+			if (hint) hint.textContent = '미적용';
+			const status = document.getElementById('basketStatusText');
+			if (status) status.textContent = '엑셀 파일을 선택해 주세요 (코드 컬럼 필요)';
+			const input = document.getElementById('basketFileInput');
+			if (input) input.value = '';
+			renderTable();
+		});
+		document.getElementById('basketFileInput')?.addEventListener('change', (e) => {
+			const file = e.target?.files?.[0];
+			loadBasketFromExcelFile(file);
+		});
+		document.addEventListener('keydown', (e) => {
+			if (e.key !== 'Escape') return;
+			if (stockChartModalOpen) setStockChartModalVisible(false);
+			if (usCpiModalOpen) setUsCpiModalVisible(false);
+			if (usRateModalOpen) setUsRateModalVisible(false);
+			if (basketModalOpen) setBasketModalVisible(false);
+			if (favoritesModalOpen) setFavoritesModalVisible(false);
+			if (sectorModalOpen) setSectorModalVisible(false);
+		});
+		document.getElementById('stockChartModalTabs')?.addEventListener('click', (e) => {
+			const btn = e.target?.closest?.('.chartTab');
+			if (!btn) return;
+			const kind = btn.dataset?.kind;
+			if (!kind) return;
+			setStockChartModalKind(kind);
+		});
+
+		updateStickyHeaderTopOffset();
+		observeTopHeaderSize();
+		ensureRangeSelectOptions();
+		// normalize potentially old saved defaults (e.g. max=2) and reflect in select
+		try {
+			const normalized = normalizeRangePct(MIN_PCT, MAX_PCT);
+			if (normalized) {
+				MIN_PCT = normalized.minPct;
+				MAX_PCT = normalized.maxPct;
+				saveRangePctToStorage(MIN_PCT, MAX_PCT);
+			}
+		} catch {}
+		syncRangeSelectValuesFromState();
+		loadFavoritesFromServer().catch(() => {});
+		updateSortHeaderLabels();
+		updateMarketDeposit();
+		updateOilWti();
+		updateUsFuturesNq();
+		updateUsFuturesEs();
+		updateUs10y();
+		updateUsdIndex();
+		updateKospi200NightFutures();
+		refreshBasisSnapshot().catch(() => {});
+		updateFearGreed();
+		update();
+		window.addEventListener('resize', () => {
+			updateStickyHeaderTopOffset();
+		});
+		setInterval(updateMarketDeposit, 60_000);
+		setInterval(updateOilWti, 60_000);
+		setInterval(updateUsFuturesNq, 60_000);
+		setInterval(updateUsFuturesEs, 60_000);
+		setInterval(updateUs10y, 60_000);
+		setInterval(updateUsdIndex, 60_000);
+		setInterval(updateKospi200NightFutures, 60_000);
+		setInterval(() => { refreshBasisSnapshot().catch(() => {}); }, 60_000);
+		setInterval(updateFearGreed, 60_000);
+		setInterval(update, 35_000);
+	</script>
+</body>
+</html>
