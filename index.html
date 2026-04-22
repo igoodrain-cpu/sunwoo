@@ -52,6 +52,7 @@
 		}
 		.title { font-weight: 800; letter-spacing: .2px; }
 		.muted { color: var(--muted); }
+		.highlightYellow { color: #ffd54a; }
 
 		.controls {
 			display: flex;
@@ -303,6 +304,26 @@
 			overflow: visible;
 			text-overflow: clip;
 		}
+		#tradingValueModalPanel {
+			display: flex;
+			flex-direction: column;
+			max-height: min(88vh, 980px);
+		}
+		#tradingValueModalPanel .modalBody {
+			flex: 1 1 auto;
+			min-height: 0;
+			max-height: calc(88vh - 54px);
+			overflow: auto;
+		}
+		#tradingValueModalContent .favoritesTableWrap {
+			max-height: calc(88vh - 150px);
+			overflow: auto;
+		}
+		#tradingValueModalContent .favoritesStockTable thead th {
+			position: sticky;
+			top: 0;
+			z-index: 1;
+		}
 
 		/* Sector modal */
 		.sectorGrid {
@@ -327,6 +348,15 @@
 		.sectorCard:hover { background: rgba(255,255,255,.06); }
 		.sectorTitle { font-weight: 800; }
 		.sectorDesc { margin-top: 6px; color: var(--muted); font-size: 12px; }
+		.tradingMeta {
+			display: flex;
+			gap: 10px;
+			align-items: center;
+			justify-content: space-between;
+			flex-wrap: wrap;
+			margin-bottom: 10px;
+		}
+		.tradingMeta strong { font-weight: 800; }
 	</style>
 	<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
 	<script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
@@ -364,10 +394,12 @@
 					<button class="pill" id="stockSearchBtn" data-busy-disable="1">검색</button>
 					<button class="pill" id="favoritesBtn" data-busy-disable="1">관심종목</button>
 					<button class="pill" id="sectorBtn" data-busy-disable="1">섹터종목</button>
+					<button class="pill" id="tradingBtn" data-busy-disable="1">트레이딩종목</button>
+					<button class="pill" id="tradingValueBtn" data-busy-disable="1">거래대금</button>
 				</div>
 				<div class="segment">
-					<span class="muted">예치금</span>
-					<span id="marketDepositText">-</span>
+					<span class="highlightYellow">예치금</span>
+					<span id="marketDepositText" class="highlightYellow">-</span>
 				</div>
 				<div class="segment">
 					<span class="muted">오일(WTI)</span>
@@ -417,13 +449,12 @@
 							<th class="sortable right" data-sort-key="changePct">등락률</th>
 							<th class="sortable right" data-sort-key="rsi14">RSI(50~60)</th>
 							<th class="sortable right" data-sort-key="sidewaysScore">횡보</th>
-								<th class="sortable right" data-sort-key="disparity5Pct">5일 이격도</th>
+							<th class="sortable right" data-sort-key="disparity5Pct">5일 이격도</th>
 							<th class="sortable right" data-sort-key="frgn_net_qty">외국인 수급</th>
+							<th class="sortable right" data-sort-key="loan_balance_amount">대차거래잔고</th>
 							<th class="sortable right" data-sort-key="current_per">PER배수</th>
 							<th class="sortable right" data-sort-key="target_prc">목표가(PER)</th>
 							<th class="sortable right" data-sort-key="kb_tp">KB</th>
-							<th class="sortable right" data-sort-key="nh_tp">NH</th>
-							<th class="sortable right" data-sort-key="kis_tp">KIS</th>
 						</tr>
 					</thead>
 					<tbody></tbody>
@@ -499,7 +530,7 @@
 				<img id="stockChartModalImg" class="chartImg" alt="차트" />
 				<div id="stockChartModalOpProfitSection" class="opProfitSection" style="display:none">
 					<div class="opProfitHeader">
-						<div class="muted">영업이익 (최근 3년)</div>
+						<div class="muted">영업이익 (최근 5년)</div>
 						<div style="display:flex; gap:10px; align-items:center;">
 							<div class="muted" id="stockChartModalKeyStats">-</div>
 							<div class="muted" id="stockChartModalOpProfitUnit">-</div>
@@ -629,6 +660,46 @@
 						<div class="sectorDesc">산업기계·로봇·자동화</div>
 					</button>
 				</div>
+			</div>
+		</div>
+	</div>
+
+	<!-- Trading Modal -->
+	<div id="tradingModalOverlay" class="modalOverlay" aria-hidden="true">
+		<div id="tradingModalPanel" class="modalPanel" role="dialog" aria-modal="true">
+			<div class="modalHeader">
+				<div class="modalTitle">트레이딩종목</div>
+				<div class="actions">
+					<button class="pill" id="tradingRefreshBtn" type="button" data-busy-disable="1">재검색</button>
+					<button class="pill" id="tradingModalCloseBtn" type="button">닫기</button>
+				</div>
+			</div>
+			<div class="modalBody">
+				<div class="tradingMeta">
+					<div class="muted" id="tradingModalHint">최근 1년 고점 대비 25% 이상 하락한 종목을 찾습니다.</div>
+					<div class="muted"><strong>100개</strong>까지 표시</div>
+				</div>
+				<div id="tradingModalContent" class="muted">-</div>
+			</div>
+		</div>
+	</div>
+
+	<!-- Trading Value Modal -->
+	<div id="tradingValueModalOverlay" class="modalOverlay" aria-hidden="true">
+		<div id="tradingValueModalPanel" class="modalPanel" role="dialog" aria-modal="true">
+			<div class="modalHeader">
+				<div class="modalTitle">거래대금</div>
+				<div class="actions">
+					<button class="pill" id="tradingValueRefreshBtn" type="button" data-busy-disable="1">새로고침</button>
+					<button class="pill" id="tradingValueModalCloseBtn" type="button">닫기</button>
+				</div>
+			</div>
+			<div class="modalBody">
+				<div class="tradingMeta">
+					<div class="muted" id="tradingValueModalHint">거래대금 상위 50종목을 표시합니다.</div>
+					<div class="muted"><strong>50개</strong>까지 표시</div>
+				</div>
+				<div id="tradingValueModalContent" class="muted">-</div>
 			</div>
 		</div>
 	</div>
@@ -854,6 +925,17 @@
 			overlay.classList.toggle('open', sectorModalOpen);
 			overlay.setAttribute('aria-hidden', sectorModalOpen ? 'false' : 'true');
 		}
+
+		let tradingModalOpen = false;
+		let tradingModalLoading = false;
+		let tradingModalScanId = 0;
+		let tradingModalMatches = [];
+		let tradingModalScanStats = { scanned: 0, total: 0, matched: 0, exhausted: false };
+		const TRADING_HISTORY_TTL_MS = 6 * 60 * 60 * 1000;
+		const tradingHistoryByCode = new Map();
+		let tradingValueModalOpen = false;
+		let tradingValueModalLoading = false;
+		let tradingValueUniverseItems = [];
 
 		let SECTOR_FILTER = null; // one of sectorCard[data-sector] or null
 		const SECTOR_DEFS = {
@@ -1355,6 +1437,18 @@
 			return `${Math.round(n).toLocaleString('ko-KR')}`;
 		}
 
+		function formatEok(value, digits = 1) {
+			const n = parseNumber(value);
+			if (!Number.isFinite(n)) return '-';
+			const v = n / 100000000;
+			const rounded = Math.round(v * Math.pow(10, digits)) / Math.pow(10, digits);
+			const isIntegerLike = Math.abs(rounded - Math.round(rounded)) < 1e-9;
+			return `${rounded.toLocaleString('ko-KR', {
+				minimumFractionDigits: isIntegerLike ? 0 : digits,
+				maximumFractionDigits: digits,
+			})}억`;
+		}
+
 		function escapeHtml(text) {
 			return String(text ?? '')
 				.replace(/&/g, '&amp;')
@@ -1373,7 +1467,7 @@
 			return `${d.getFullYear()}${pad(d.getMonth() + 1)}${pad(d.getDate())}_${pad(d.getHours())}${pad(d.getMinutes())}${pad(d.getSeconds())}`;
 		}
 
-		const EXPORT_COLUMNS = ['종목', '코드', '현재가', '등락률', 'KB', 'NH', 'KIS'];
+		const EXPORT_COLUMNS = ['종목', '코드', '현재가', '등락률', '대차거래잔고', 'KB'];
 
 		function exportCheckedRowsToExcel() {
 			if (!window.XLSX) {
@@ -1524,11 +1618,10 @@
 				case 'sidewaysScore': return Number.isFinite(Number(s?.score)) ? Number(s.score) : null;
 					case 'disparity5Pct': return Number.isFinite(Number(m?.disparity5Pct)) ? Number(m.disparity5Pct) : null;
 				case 'frgn_net_qty': return parseNumber(f?.frgn_net_qty);
+				case 'loan_balance_amount': return parseNumber(t?.loan_balance_amount);
 				case 'current_per': return Number.isFinite(Number(t?.current_per)) ? Number(t.current_per) : null;
 				case 'target_prc': return parseNumber(t?.target_prc);
 				case 'kb_tp': return parseNumber(t?.kb_tp);
-				case 'nh_tp': return parseNumber(t?.nh_tp);
-				case 'kis_tp': return parseNumber(t?.kis_tp);
 				default: return null;
 			}
 		}
@@ -1693,10 +1786,9 @@
 				const flowText = Number.isFinite(flowNum) ? formatSignedInt(flowNum) : '-';
 				const flowCls = Number.isFinite(flowNum) ? (flowNum > 0 ? 'up' : (flowNum < 0 ? 'down' : '')) : '';
 				const t = targetsByCode.get(code) || null;
+					const loanBalanceText = formatEok(t?.loan_balance_amount);
 				const kbTpNum = parseNumber(t?.kb_tp);
-				const nhTpNum = parseNumber(t?.nh_tp);
-				const kisTpNum = parseNumber(t?.kis_tp);
-				const brokerTargets = [kbTpNum, nhTpNum, kisTpNum].filter(Number.isFinite);
+				const brokerTargets = [kbTpNum].filter(Number.isFinite);
 				const priceBelowTarget = Number.isFinite(priceNum)
 					&& brokerTargets.length > 0
 					&& brokerTargets.some(tp => priceNum < tp);
@@ -1706,8 +1798,6 @@
 					: '-';
 				const tp = formatWon(t?.target_prc);
 				const kb = formatWon(t?.kb_tp);
-				const nh = formatWon(t?.nh_tp);
-				const kis = formatWon(t?.kis_tp);
 				return `
 					<tr data-code="${escapeHtml(code)}">
 						<td>
@@ -1723,16 +1813,21 @@
 						<td class="right">${escapeHtml(sidewaysText)}</td>
 							<td class="right ${disparityCls}">${escapeHtml(disparityText + disparityLabel)}</td>
 						<td class="right ${flowCls}">${escapeHtml(flowText)}</td>
+						<td class="right">${escapeHtml(loanBalanceText)}</td>
 						<td class="right">${escapeHtml(perText)}</td>
 						<td class="right">${escapeHtml(tp)}</td>
 						<td class="right">${escapeHtml(kb)}</td>
-						<td class="right">${escapeHtml(nh)}</td>
-						<td class="right">${escapeHtml(kis)}</td>
 					</tr>
 				`;
 			}).join('');
 			if (favoritesModalOpen) {
 				try { renderFavoritesModal(); } catch {}
+			}
+			if (tradingModalOpen) {
+				try { renderTradingModal(); } catch {}
+			}
+			if (tradingValueModalOpen) {
+				try { renderTradingValueModal(); } catch {}
 			}
 		}
 
@@ -1938,7 +2033,7 @@
 			// If backend says nothing is pending, treat it as "complete enough"
 			// even when values are null (some stocks legitimately have no target data).
 			if (Array.isArray(entry.pending) && entry.pending.length === 0) return true;
-			const keys = ['current_per', 'target_prc', 'kb_tp', 'nh_tp', 'kis_tp'];
+			const keys = ['current_per', 'target_prc', 'kb_tp', 'nh_tp', 'kis_tp', 'loan_balance_amount'];
 			return keys.some((k) => entry[k] !== undefined && entry[k] !== null);
 		}
 
@@ -1996,17 +2091,10 @@
 					return (now - (entry.fetchedAtMs || 0)) > TTL_MS;
 				});
 				if (needed.length === 0) continue;
-				// pending/미완료 종목은 백엔드 큐에 작업을 넣을 수 있게 cacheOnly=0로 호출합니다.
-				// (완료된 종목은 cacheOnly=1로 가볍게 폴링)
-				const shouldEnqueueRefresh = needed.some((c) => {
-					const entry = targetsByCode.get(c) || null;
-					if (!entry) return true;
-					const pending = Array.isArray(entry.pending) ? entry.pending : [];
-					// pending이 있으면 cacheOnly=0로 호출해 백엔드 큐를 트리거
-					return pending.includes('per') || pending.includes('brokers');
-				});
-				const cacheOnly = shouldEnqueueRefresh ? 0 : 1;
-				const url = `/api/targets?codes=${encodeURIComponent(needed.join(','))}&withPerPbr=1&withBrokers=1&cacheOnly=${cacheOnly}&apiPerTtlMs=${encodeURIComponent(API_PER_TTL_MS)}&apiBrokerTtlMs=${encodeURIComponent(API_BROKER_TTL_MS)}`;
+				// 화면에 보이는 targets 계열 컬럼은 갱신 주기마다 실제 백엔드 SWR 갱신이 돌도록
+				// stale/미완료 항목 모두 cacheOnly=0으로 요청합니다.
+				const cacheOnly = 0;
+				const url = `/api/targets?codes=${encodeURIComponent(needed.join(','))}&withPerPbr=1&withBrokers=1&withLoanBalance=1&cacheOnly=${cacheOnly}&apiPerTtlMs=${encodeURIComponent(API_PER_TTL_MS)}&apiBrokerTtlMs=${encodeURIComponent(API_BROKER_TTL_MS)}`;
 				let r;
 				let j;
 					try {
@@ -2054,13 +2142,14 @@
 						kb_tp: coalesceDefined(it?.kb_tp, prev?.kb_tp ?? null),
 						nh_tp: coalesceDefined(it?.nh_tp, prev?.nh_tp ?? null),
 						kis_tp: coalesceDefined(it?.kis_tp, prev?.kis_tp ?? null),
+						loan_balance_amount: coalesceDefined(it?.loan_balance_amount, prev?.loan_balance_amount ?? null),
 						pending: Array.isArray(it?.pending) ? it.pending.slice() : (Array.isArray(prev?.pending) ? prev.pending.slice() : []),
 						fetchedAtMs: Date.now(),
 					};
 					targetsByCode.set(code, next);
 					if (!prev) changed = true;
 					else {
-						const keys = ['current_per', 'target_prc', 'kb_tp', 'nh_tp', 'kis_tp'];
+						const keys = ['current_per', 'target_prc', 'kb_tp', 'nh_tp', 'kis_tp', 'loan_balance_amount'];
 						if (keys.some(k => String(prev?.[k] ?? '') !== String(next?.[k] ?? ''))) changed = true;
 					}
 
@@ -2896,6 +2985,362 @@
 			return `${url}${sep}sidcode=${Date.now()}`;
 		}
 
+		function formatYmdCompact(ymd) {
+			const s = String(ymd ?? '').trim();
+			if (!/^\d{8}$/.test(s)) return '-';
+			return `${s.slice(0, 4)}-${s.slice(4, 6)}-${s.slice(6, 8)}`;
+		}
+
+		function getDateOffsetYmd(daysAgo) {
+			const d = new Date();
+			d.setHours(0, 0, 0, 0);
+			d.setDate(d.getDate() - Math.max(0, Number(daysAgo) || 0));
+			const y = d.getFullYear();
+			const m = String(d.getMonth() + 1).padStart(2, '0');
+			const day = String(d.getDate()).padStart(2, '0');
+			return `${y}${m}${day}`;
+		}
+
+		function getTradingUniverseItems() {
+			const base = applySectorFilter(applyBasketFilter(latestItems));
+			return sortItems(base);
+		}
+
+		function getTradingValueUniverseItems() {
+			const source = Array.isArray(tradingValueUniverseItems) && tradingValueUniverseItems.length
+				? tradingValueUniverseItems
+				: latestItems;
+			return source.slice().sort((a, b) => {
+				const av = parseNumber(a?.acml_tr_pbmn);
+				const bv = parseNumber(b?.acml_tr_pbmn);
+				const aFinite = Number.isFinite(av);
+				const bFinite = Number.isFinite(bv);
+				if (!aFinite && !bFinite) return String(a?.code ?? '').localeCompare(String(b?.code ?? ''), 'ko', { numeric: true, sensitivity: 'base' });
+				if (!aFinite) return 1;
+				if (!bFinite) return -1;
+				if (bv !== av) return bv - av;
+				return String(a?.code ?? '').localeCompare(String(b?.code ?? ''), 'ko', { numeric: true, sensitivity: 'base' });
+			});
+		}
+
+		function getTradingValueContextText() {
+			return `시장: ${getMarketFilterLabelKor()}`;
+		}
+
+		async function fetchTradingValueUniverse() {
+			const url = `/api/trading-value-stocks?limit=${encodeURIComponent(50)}&market=${encodeURIComponent(MARKET_FILTER)}`;
+			const r = await fetch(url, { cache: 'no-store' });
+			const j = await r.json().catch(() => ({}));
+			if (!r.ok || j?.error) throw new Error(j?.error || `HTTP ${r.status}`);
+			return Array.isArray(j.items) ? j.items : [];
+		}
+
+		function getTradingContextText() {
+			const parts = [`시장: ${getMarketFilterLabelKor()}`];
+			if (SECTOR_FILTER && SECTOR_DEFS[SECTOR_FILTER]?.label) parts.push(`섹터: ${SECTOR_DEFS[SECTOR_FILTER].label}`);
+			if (basketActive) parts.push('basket 적용');
+			return parts.join(' / ');
+		}
+
+		function buildTradingItemByCodeMap() {
+			const map = new Map();
+			for (const it of getTradingUniverseItems()) {
+				const code = String(it?.code ?? '').trim().padStart(6, '0');
+				if (/^[0-9]{6}$/.test(code) && !map.has(code)) map.set(code, it);
+			}
+			return map;
+		}
+
+		function buildTradingValueItemByCodeMap() {
+			const map = new Map();
+			for (const it of getTradingValueUniverseItems().slice(0, 50)) {
+				const code = String(it?.code ?? '').trim().padStart(6, '0');
+				if (/^[0-9]{6}$/.test(code) && !map.has(code)) map.set(code, it);
+			}
+			return map;
+		}
+
+		function renderTradingModal() {
+			const hintEl = document.getElementById('tradingModalHint');
+			const contentEl = document.getElementById('tradingModalContent');
+			if (!contentEl) return;
+
+			const itemByCode = buildTradingItemByCodeMap();
+			const rows = tradingModalMatches.map((entry) => {
+				const live = itemByCode.get(entry.code) || null;
+				const priceNum = parseNumber(live?.stck_prpr);
+				if (!Number.isFinite(priceNum) || !Number.isFinite(entry?.oneYearHigh) || entry.oneYearHigh <= 0) return null;
+				const dropPct = ((entry.oneYearHigh - priceNum) / entry.oneYearHigh) * 100;
+				if (!Number.isFinite(dropPct) || dropPct < 25) return null;
+				const changePctNum = parseNumber(live?.prdy_ctrt);
+				return {
+					code: entry.code,
+					name: String(live?.name || live?.hts_kor_isnm || entry?.name || entry.code),
+					priceNum,
+					oneYearHigh: entry.oneYearHigh,
+					highestDate: entry.highestDate,
+					dropPct,
+					changePctNum,
+				};
+			}).filter(Boolean).sort((a, b) => {
+				if (b.dropPct !== a.dropPct) return b.dropPct - a.dropPct;
+				return a.code.localeCompare(b.code, 'ko', { numeric: true, sensitivity: 'base' });
+			}).slice(0, 100);
+
+			if (hintEl) {
+				const base = tradingModalLoading
+					? `스캔중... ${tradingModalScanStats.scanned.toLocaleString('ko-KR')}/${tradingModalScanStats.total.toLocaleString('ko-KR')} · 조건충족 ${rows.length.toLocaleString('ko-KR')}개`
+					: rows.length
+						? `최근 1년 고점 대비 25% 이상 하락 종목 ${rows.length.toLocaleString('ko-KR')}개`
+						: '조건을 만족한 종목이 없습니다.';
+				hintEl.textContent = `${base} (${getTradingContextText()})`;
+			}
+
+			if (rows.length === 0) {
+				contentEl.classList.add('muted');
+				contentEl.innerHTML = `<div class="muted">${tradingModalLoading ? '일봉 데이터를 조회하고 있습니다...' : '표시할 종목이 없습니다.'}</div>`;
+				return;
+			}
+
+			const rowsHtml = rows.map((row) => {
+				const changeCls = Number.isFinite(row.changePctNum) ? (row.changePctNum > 0 ? 'up' : (row.changePctNum < 0 ? 'down' : '')) : '';
+				return `
+					<tr data-code="${escapeHtml(row.code)}">
+						<td>${escapeHtml(row.name)}</td>
+						<td class="code">${escapeHtml(row.code)}</td>
+						<td class="right">${escapeHtml(formatWon(row.priceNum))}</td>
+						<td class="right">${escapeHtml(formatWon(row.oneYearHigh))}</td>
+						<td class="right">${escapeHtml(formatYmdCompact(row.highestDate))}</td>
+						<td class="right down">${escapeHtml(formatPct(row.dropPct, 2))}</td>
+						<td class="right ${changeCls}">${escapeHtml(Number.isFinite(row.changePctNum) ? formatPct(row.changePctNum, 2) : '-')}</td>
+					</tr>
+				`;
+			}).join('');
+
+			contentEl.classList.remove('muted');
+			contentEl.innerHTML = [
+				'<div class="favoritesTableWrap">',
+				'<table class="stockTable favoritesStockTable">',
+				'<colgroup><col /><col style="width:110px" /><col style="width:130px" /><col style="width:130px" /><col style="width:110px" /><col style="width:130px" /><col style="width:110px" /></colgroup>',
+				'<thead><tr><th scope="col">종목</th><th scope="col">코드</th><th scope="col" class="right">현재가</th><th scope="col" class="right">1년 고점</th><th scope="col" class="right">고점일</th><th scope="col" class="right">고점대비 하락률</th><th scope="col" class="right">등락률</th></tr></thead>',
+				'<tbody>',
+				rowsHtml,
+				'</tbody></table></div>',
+			].join('');
+		}
+
+		function setTradingModalVisible(visible) {
+			tradingModalOpen = !!visible;
+			const overlay = document.getElementById('tradingModalOverlay');
+			if (!overlay) return;
+			overlay.classList.toggle('open', tradingModalOpen);
+			overlay.setAttribute('aria-hidden', tradingModalOpen ? 'false' : 'true');
+			if (!tradingModalOpen) {
+				tradingModalScanId += 1;
+				tradingModalLoading = false;
+				return;
+			}
+			renderTradingModal();
+			refreshTradingCandidates().catch(() => {});
+		}
+
+		function renderTradingValueModal() {
+			const hintEl = document.getElementById('tradingValueModalHint');
+			const contentEl = document.getElementById('tradingValueModalContent');
+			if (!contentEl) return;
+			const rows = getTradingValueUniverseItems()
+				.filter((item) => Number.isFinite(parseNumber(item?.acml_tr_pbmn)))
+				.slice(0, 50)
+				.map((item) => {
+					const code = String(item?.code ?? '').trim().padStart(6, '0');
+					const live = item || null;
+					const priceNum = parseNumber(live?.stck_prpr);
+					const tradingValueNum = parseNumber(live?.acml_tr_pbmn);
+					const changePctNum = parseNumber(live?.prdy_ctrt);
+					return {
+						code,
+						name: String(live?.name || live?.hts_kor_isnm || code),
+						priceNum,
+						tradingValueNum,
+						changePctNum,
+					};
+				});
+
+			if (hintEl) {
+				const base = tradingValueModalLoading
+					? '거래대금 상위 50종목을 불러오는 중입니다...'
+					: rows.length
+						? '거래대금 상위 50종목을 표시합니다.'
+						: '표시할 종목이 없습니다.';
+				hintEl.textContent = `${base} (${getTradingValueContextText()})`;
+			}
+
+			if (rows.length === 0) {
+				contentEl.classList.add('muted');
+				contentEl.innerHTML = `<div class="muted">${tradingValueModalLoading ? '거래대금 상위 종목을 조회하고 있습니다...' : '표시할 종목이 없습니다.'}</div>`;
+				return;
+			}
+
+			const rowsHtml = rows.map((row) => {
+				const changeCls = Number.isFinite(row.changePctNum) ? (row.changePctNum > 0 ? 'up' : (row.changePctNum < 0 ? 'down' : '')) : '';
+				return `
+					<tr data-code="${escapeHtml(row.code)}">
+						<td>${escapeHtml(row.name)}</td>
+						<td class="code">${escapeHtml(row.code)}</td>
+						<td class="right">${escapeHtml(formatEok(row.tradingValueNum))}</td>
+						<td class="right">${escapeHtml(formatWon(row.priceNum))}</td>
+						<td class="right ${changeCls}">${escapeHtml(Number.isFinite(row.changePctNum) ? formatPct(row.changePctNum, 2) : '-')}</td>
+					</tr>
+				`;
+			}).join('');
+
+			contentEl.classList.remove('muted');
+			contentEl.innerHTML = [
+				'<div class="favoritesTableWrap">',
+				'<table class="stockTable favoritesStockTable">',
+				'<colgroup><col /><col style="width:110px" /><col style="width:140px" /><col style="width:120px" /><col style="width:100px" /></colgroup>',
+				'<thead><tr><th scope="col">종목</th><th scope="col">코드</th><th scope="col" class="right">거래대금</th><th scope="col" class="right">현재가</th><th scope="col" class="right">등락률</th></tr></thead>',
+				'<tbody>',
+				rowsHtml,
+				'</tbody></table></div>',
+			].join('');
+		}
+
+		function setTradingValueModalVisible(visible) {
+			tradingValueModalOpen = !!visible;
+			const overlay = document.getElementById('tradingValueModalOverlay');
+			if (!overlay) return;
+			overlay.classList.toggle('open', tradingValueModalOpen);
+			overlay.setAttribute('aria-hidden', tradingValueModalOpen ? 'false' : 'true');
+			if (!tradingValueModalOpen) {
+				tradingValueModalLoading = false;
+				return;
+			}
+			renderTradingValueModal();
+			refreshTradingValueCandidates().catch(() => {});
+		}
+
+		async function getTradingHistorySnapshot(code) {
+			const normalized = String(code ?? '').trim().padStart(6, '0');
+			if (!/^[0-9]{6}$/.test(normalized)) throw new Error('유효하지 않은 code');
+			const cached = tradingHistoryByCode.get(normalized) || null;
+			if (cached && (Date.now() - (cached.fetchedAtMs || 0)) <= TRADING_HISTORY_TTL_MS) return cached;
+
+			const url = `/api/naver-fchart?code=${encodeURIComponent(normalized)}&timeframe=day&count=320&ttlMs=${encodeURIComponent(TRADING_HISTORY_TTL_MS)}`;
+			const r = await fetch(url, { cache: 'no-store' });
+			const j = await r.json().catch(() => ({}));
+			if (!r.ok || j?.error) throw new Error(j?.error || `HTTP ${r.status}`);
+
+			const cutoffYmd = getDateOffsetYmd(365);
+			const allItems = Array.isArray(j?.items) ? j.items : [];
+			const recentItems = allItems.filter((row) => String(row?.date ?? '') >= cutoffYmd);
+			const source = recentItems.length ? recentItems : allItems;
+
+			let oneYearHigh = null;
+			let highestDate = '';
+			for (const row of source) {
+				const highNum = parseNumber(row?.high);
+				const date = String(row?.date ?? '');
+				if (!Number.isFinite(highNum) || !/^\d{8}$/.test(date)) continue;
+				if (!Number.isFinite(oneYearHigh) || highNum > oneYearHigh) {
+					oneYearHigh = highNum;
+					highestDate = date;
+				}
+			}
+			if (!Number.isFinite(oneYearHigh) || oneYearHigh <= 0) throw new Error('1년 고점 데이터 없음');
+
+			const payload = { code: normalized, oneYearHigh, highestDate, fetchedAtMs: Date.now() };
+			tradingHistoryByCode.set(normalized, payload);
+			return payload;
+		}
+
+		async function evaluateTradingCandidate(item) {
+			const code = String(item?.code ?? '').trim().padStart(6, '0');
+			const priceNum = parseNumber(item?.stck_prpr);
+			if (!/^[0-9]{6}$/.test(code) || !Number.isFinite(priceNum) || priceNum <= 0) return null;
+			const history = await getTradingHistorySnapshot(code);
+			const highNum = Number(history?.oneYearHigh);
+			if (!Number.isFinite(highNum) || highNum <= 0) return null;
+			const dropPct = ((highNum - priceNum) / highNum) * 100;
+			if (!Number.isFinite(dropPct) || dropPct < 25) return null;
+			return {
+				code,
+				name: String(item?.name || item?.hts_kor_isnm || code),
+				tradingValueNum: parseNumber(item?.acml_tr_pbmn),
+				oneYearHigh: highNum,
+				highestDate: history?.highestDate || '',
+				dropPct,
+			};
+		}
+
+		async function refreshTradingCandidates() {
+			const candidates = getTradingUniverseItems();
+			const scanId = ++tradingModalScanId;
+			tradingModalLoading = true;
+			tradingModalMatches = [];
+			tradingModalScanStats = {
+				scanned: 0,
+				total: candidates.length,
+				matched: 0,
+				exhausted: false,
+			};
+			renderTradingModal();
+
+			if (candidates.length === 0) {
+				tradingModalLoading = false;
+				renderTradingModal();
+				return;
+			}
+
+			const found = [];
+			let cursor = 0;
+			const concurrency = Math.min(6, Math.max(2, navigator.hardwareConcurrency ? Math.floor(navigator.hardwareConcurrency / 2) : 4));
+
+			const worker = async () => {
+				while (scanId === tradingModalScanId && tradingModalOpen && cursor < candidates.length && found.length < 100) {
+					const item = candidates[cursor++];
+					let match = null;
+					try {
+						match = await evaluateTradingCandidate(item);
+					} catch {}
+					tradingModalScanStats.scanned += 1;
+					if (match) {
+						found.push(match);
+						tradingModalScanStats.matched = found.length;
+						tradingModalMatches = found.slice().sort((a, b) => b.dropPct - a.dropPct).slice(0, 100);
+					}
+					if (tradingModalOpen && (match || (tradingModalScanStats.scanned % 8) === 0)) {
+						renderTradingModal();
+					}
+				}
+			};
+
+			await Promise.all(Array.from({ length: concurrency }, () => worker()));
+			if (scanId !== tradingModalScanId) return;
+
+			tradingModalMatches = found.slice().sort((a, b) => b.dropPct - a.dropPct).slice(0, 100);
+			tradingModalScanStats = {
+				scanned: Math.min(tradingModalScanStats.scanned, candidates.length),
+				total: candidates.length,
+				matched: tradingModalMatches.length,
+				exhausted: cursor >= candidates.length,
+			};
+			tradingModalLoading = false;
+			renderTradingModal();
+		}
+
+		async function refreshTradingValueCandidates() {
+			tradingValueModalLoading = true;
+			renderTradingValueModal();
+			try {
+				tradingValueUniverseItems = await fetchTradingValueUniverse();
+			} catch {
+				tradingValueUniverseItems = [];
+			}
+			tradingValueModalLoading = false;
+			renderTradingValueModal();
+		}
+
 		function setStockChartModalVisible(visible) {
 			stockChartModalOpen = !!visible;
 			const overlay = document.getElementById('stockChartModalOverlay');
@@ -2957,14 +3402,18 @@
 				if (Number.isFinite(creditNum)) parts.push(`신용: ${formatPct(creditNum, 2)}`);
 				if (statsEl) statsEl.textContent = parts.length ? parts.join(' / ') : '-';
 
-				const y1 = Number(item?.lastYear);
-				const y2 = Number(item?.prevYear);
-				const y3 = Number(item?.thirdYear);
-				const rows = [
-					{ year: y1, value: item?.opProfitLastYear },
-					{ year: y2, value: item?.opProfitPrevYear },
-					{ year: y3, value: item?.opProfitThirdYear },
-				].filter(r2 => Number.isFinite(r2.year));
+				const rows = Array.isArray(item?.annualOpProfits) && item.annualOpProfits.length
+					? item.annualOpProfits.map((r2) => ({
+						year: Number(r2?.year),
+						value: r2?.value,
+					})).filter(r2 => Number.isFinite(r2.year))
+					: [
+						{ year: Number(item?.lastYear), value: item?.opProfitLastYear },
+						{ year: Number(item?.prevYear), value: item?.opProfitPrevYear },
+						{ year: Number(item?.thirdYear), value: item?.opProfitThirdYear },
+						{ year: Number(item?.fourthYear), value: item?.opProfitFourthYear },
+						{ year: Number(item?.fifthYear), value: item?.opProfitFifthYear },
+					].filter(r2 => Number.isFinite(r2.year));
 
 				// 최신 연도가 위로 오도록 정렬
 				rows.sort((a, b) => b.year - a.year);
@@ -3036,6 +3485,8 @@
 		document.getElementById('stockSearchBtn')?.addEventListener('click', () => renderTable());
 		document.getElementById('favoritesBtn')?.addEventListener('click', () => setFavoritesModalVisible(true));
 		document.getElementById('sectorBtn')?.addEventListener('click', () => setSectorModalVisible(true));
+		document.getElementById('tradingBtn')?.addEventListener('click', () => setTradingModalVisible(true));
+		document.getElementById('tradingValueBtn')?.addEventListener('click', () => setTradingValueModalVisible(true));
 		document.getElementById('stockSearchInput')?.addEventListener('keydown', (e) => {
 			if (e.key === 'Enter') { e.preventDefault(); renderTable(); }
 		});
@@ -3154,6 +3605,36 @@
 		document.getElementById('sectorModalOverlay')?.addEventListener('click', (e) => {
 			if (e.target?.id === 'sectorModalOverlay') setSectorModalVisible(false);
 		});
+		document.getElementById('tradingRefreshBtn')?.addEventListener('click', () => {
+			refreshTradingCandidates().catch(() => {});
+		});
+		document.getElementById('tradingModalCloseBtn')?.addEventListener('click', () => setTradingModalVisible(false));
+		document.getElementById('tradingModalOverlay')?.addEventListener('click', (e) => {
+			if (e.target?.id === 'tradingModalOverlay') setTradingModalVisible(false);
+		});
+		document.getElementById('tradingModalContent')?.addEventListener('dblclick', (e) => {
+			const tr = e.target?.closest?.('tr[data-code]');
+			if (!tr) return;
+			const code = String(tr.dataset?.code ?? '').trim().padStart(6, '0');
+			if (!/^[0-9]{6}$/.test(code)) return;
+			const name = tr.cells?.[0]?.textContent ?? '';
+			openStockChartModal(code, name);
+		});
+		document.getElementById('tradingValueRefreshBtn')?.addEventListener('click', () => {
+			refreshTradingValueCandidates().catch(() => {});
+		});
+		document.getElementById('tradingValueModalCloseBtn')?.addEventListener('click', () => setTradingValueModalVisible(false));
+		document.getElementById('tradingValueModalOverlay')?.addEventListener('click', (e) => {
+			if (e.target?.id === 'tradingValueModalOverlay') setTradingValueModalVisible(false);
+		});
+		document.getElementById('tradingValueModalContent')?.addEventListener('dblclick', (e) => {
+			const tr = e.target?.closest?.('tr[data-code]');
+			if (!tr) return;
+			const code = String(tr.dataset?.code ?? '').trim().padStart(6, '0');
+			if (!/^[0-9]{6}$/.test(code)) return;
+			const name = tr.cells?.[0]?.textContent ?? '';
+			openStockChartModal(code, name);
+		});
 		document.getElementById('sectorGrid')?.addEventListener('click', (e) => {
 			const btn = e.target?.closest?.('button.sectorCard');
 			if (!btn) return;
@@ -3188,6 +3669,8 @@
 			if (basketModalOpen) setBasketModalVisible(false);
 			if (favoritesModalOpen) setFavoritesModalVisible(false);
 			if (sectorModalOpen) setSectorModalVisible(false);
+			if (tradingModalOpen) setTradingModalVisible(false);
+			if (tradingValueModalOpen) setTradingValueModalVisible(false);
 		});
 		document.getElementById('stockChartModalTabs')?.addEventListener('click', (e) => {
 			const btn = e.target?.closest?.('.chartTab');

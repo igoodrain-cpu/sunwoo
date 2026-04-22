@@ -12,6 +12,15 @@ const iconv = require('iconv-lite');
 
 // Prevent occasional upstream hangs from stalling background refresh queues.
 // Can be overridden via env.
+const fnGuideClient = axios.create({
+  baseURL: 'https://comp.fnguide.com',
+  timeout: 20_000,
+  headers: {
+    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36',
+    'Accept-Language': 'ko-KR,ko;q=0.9,en;q=0.8',
+    Referer: 'https://comp.fnguide.com/',
+  },
+});
 axios.defaults.timeout = Math.max(1_000, Math.min(120_000, Number(process.env.HTTP_TIMEOUT_MS ?? 15_000)));
 
 require('dotenv').config({ path: path.join(__dirname, 'config.env') });
@@ -79,6 +88,7 @@ function writeFavoritesFile(codes) {
   fs.writeFileSync(FAVORITES_FILE_PATH, JSON.stringify(payload, null, 2), 'utf8');
   return payload;
 }
+
 
 app.get('/api/favorites', (req, res) => {
   const data = readFavoritesFile();
@@ -527,11 +537,16 @@ const naverItemMainQuoteCacheByCode = new Map();
 const FOREIGN_FLOW_TTL_MS_DEFAULT = 60 * 1000; // 60s
 const foreignFlowCacheByKey = new Map();
 
+const KRX_SHORT_BALANCE_TTL_MS_DEFAULT = 30 * 60 * 1000; // 30m
+const krxShortBalanceCacheByKey = new Map();
+
 const MARKET_DIV_RESOLVE_TTL_MS_DEFAULT = 24 * 60 * 60 * 1000; // 24h
 const marketDivCacheByCode = new Map();
 
 const RANGE_STOCKS_TTL_MS_DEFAULT = 5 * 60 * 1000; // 5m (네이버 페이지 다수 크롤링)
 const rangeStocksCacheByKey = new Map();
+const TRADING_VALUE_STOCKS_TTL_MS_DEFAULT = 60 * 1000; // 60s
+const tradingValueStocksCacheByKey = new Map();
 
 const RESOLVE_STOCK_UNIVERSE_TTL_MS_DEFAULT = 12 * 60 * 60 * 1000; // 12h (전체 종목 리스트)
 const resolveStockUniverseCache = {
@@ -622,7 +637,22 @@ async function getYahooFuturesQuote(symbol) {
 
   const result = res?.data?.chart?.result?.[0] ?? null;
   const meta = result?.meta ?? null;
-  const price = Number(meta?.regularMarketPrice);
+  const timestamps = Array.isArray(result?.timestamp) ? result.timestamp : [];
+  const closes = Array.isArray(result?.indicators?.quote?.[0]?.close) ? result.indicators.quote[0].close : [];
+
+  let lastTradePrice = null;
+  let lastTradeUnixSec = null;
+  for (let i = Math.min(timestamps.length, closes.length) - 1; i >= 0; i--) {
+    const close = Number(closes[i]);
+    const ts = Number(timestamps[i]);
+    if (!Number.isFinite(close) || !Number.isFinite(ts)) continue;
+    lastTradePrice = close;
+    lastTradeUnixSec = ts;
+    break;
+  }
+
+  const fallbackPrice = Number(meta?.regularMarketPrice);
+  const price = Number.isFinite(lastTradePrice) ? lastTradePrice : fallbackPrice;
   if (!Number.isFinite(price)) {
     const err = new Error('Yahoo 선물 가격 파싱 실패');
     err.code = 'YAHOO_PARSE_FAILED';
@@ -635,7 +665,8 @@ async function getYahooFuturesQuote(symbol) {
   const changeRatePct = Number.isFinite(prevClose) && prevClose !== 0 ? (change / prevClose) * 100 : null;
   const direction = typeof change === 'number' ? (change > 0 ? 'up' : change < 0 ? 'down' : 'flat') : 'flat';
 
-  const unixSec = Number(meta?.regularMarketTime);
+  const fallbackUnixSec = Number(meta?.regularMarketTime);
+  const unixSec = Number.isFinite(lastTradeUnixSec) ? lastTradeUnixSec : fallbackUnixSec;
   const time = Number.isFinite(unixSec) ? formatKstYmdHm(unixSec * 1000) : null;
   const isoDate = Number.isFinite(unixSec) ? toIsoDateFromUnixSeconds(unixSec) : null;
   const name = String(meta?.shortName || meta?.longName || sym);
@@ -972,7 +1003,7 @@ function parseNaverAnnualColumnLabelsFromCompanyAnalysisTable($, $table) {
   const yearLabels = labels.filter(t => /\b\d{4}\.\d{2}\b/.test(t));
   if (yearLabels.length === 0) return null;
 
-  const n = annualCount ?? Math.min(4, yearLabels.length);
+  const n = annualCount ?? Math.min(5, yearLabels.length);
   return {
     annualCount: Math.max(1, Math.min(n, yearLabels.length)),
     annualLabels: yearLabels,
@@ -1009,6 +1040,51 @@ function parseNaverOperatingProfitFromItemMainHtml(html) {
 
   const unit = parseNaverCompanyAnalysisUnitFromHtml($, $table) || '억원';
   return { annualLabels, annualValues, unit };
+}
+
+function normalizeFinanceRowLabel(text) {
+  return String(text || '').replace(/\u00a0/g, ' ').replace(/\s+/g, ' ').trim();
+}
+
+function parseFnGuideAnnualRowFromFinanceHtml(html, rowLabel) {
+  const $ = cheerio.load(String(html || ''));
+  const wanted = normalizeFinanceRowLabel(rowLabel);
+  if (!wanted) return null;
+
+  const tableConfigs = [
+    { selector: '#highlight_D_Y table', unit: '억원' },
+    { selector: '#highlight_B_Y table', unit: '억원' },
+  ];
+
+  for (const config of tableConfigs) {
+    const $table = $(config.selector).first();
+    if (!$table || $table.length === 0) continue;
+
+    const annualLabels = $table.find('thead tr').last().find('th').toArray()
+      .map(th => normalizeFinanceRowLabel($(th).text()))
+      .filter(text => /^\d{4}\/\d{2}$/.test(text));
+    if (annualLabels.length === 0) continue;
+
+    const $row = $table.find('tbody tr').filter((_, tr) => {
+      const label = normalizeFinanceRowLabel($(tr).find('th[scope="row"]').first().text());
+      return label === wanted;
+    }).first();
+    if (!$row || $row.length === 0) continue;
+
+    const annualValues = $row.find('td').toArray().slice(0, annualLabels.length).map(td => {
+      const text = normalizeFinanceRowLabel($(td).text());
+      if (!text || text === '-' || text === 'N/A') return null;
+      return parseNumberWithCommas(text);
+    });
+
+    return {
+      annualLabels,
+      annualValues,
+      unit: config.unit,
+    };
+  }
+
+  return null;
 }
 
 function parseNaverAnnualRowFromItemMainHtml(html, rowLabel) {
@@ -1189,15 +1265,12 @@ function parseNaverEpsAndCreditFromItemMainHtml(html) {
   let creditRatioPct = null;
   try {
     const creditText = findNaverValueTextByLabel($, (t) => t.includes('신용비율'));
-    let p = parsePercentFromText(creditText);
-    if (!Number.isFinite(p)) {
-      const n = parseSignedNumberFromText(creditText);
-      if (Number.isFinite(n)) p = n;
-    }
+    const p = parseSignedNumberFromText(creditText);
     if (Number.isFinite(p)) creditRatioPct = p;
   } catch {
     creditRatioPct = null;
   }
+
   if (!Number.isFinite(creditRatioPct)) {
     const m = raw
       .replace(/\s+/g, ' ')
@@ -1615,9 +1688,7 @@ async function getNaverOperatingProfit(code) {
   const keyStats = parseNaverEpsAndCreditFromItemMainHtml(html);
 
   const nowYear = new Date().getFullYear();
-  const lastYear = nowYear - 1;
-  const prevYear = nowYear - 2;
-  const thirdYear = nowYear - 3;
+  const recentYears = Array.from({ length: 5 }, (_, idx) => nowYear - (idx + 1));
 
   const findByYear = (year) => {
     const idx = parsed.annualLabels.findIndex(lbl => String(lbl).startsWith(String(year)));
@@ -1628,22 +1699,70 @@ async function getNaverOperatingProfit(code) {
     };
   };
 
-  const last = findByYear(lastYear);
-  const prev = findByYear(prevYear);
-  const third = findByYear(thirdYear);
+  let fnGuideParsed = null;
+  const needsOlderHistory = recentYears.some((year) => {
+    const found = findByYear(year);
+    return !(found?.label || Number.isFinite(found?.value));
+  });
+
+  if (needsOlderHistory) {
+    try {
+      const fnGuideHtml = await fetchFnGuideHtml('/SVO2/ASP/SVD_Main.asp', {
+        pGB: 1,
+        gicode: `A${itemCode}`,
+        cID: '',
+        MenuYn: 'Y',
+        ReportGB: '',
+        NewMenuID: 101,
+        stkGb: 701,
+      });
+      fnGuideParsed = parseFnGuideAnnualRowFromFinanceHtml(fnGuideHtml, '영업이익');
+    } catch {
+      fnGuideParsed = null;
+    }
+  }
+
+  const findFnGuideByYear = (year) => {
+    if (!fnGuideParsed?.annualLabels?.length) return null;
+    const idx = fnGuideParsed.annualLabels.findIndex(lbl => String(lbl).startsWith(String(year)));
+    if (idx < 0) return null;
+    return {
+      label: fnGuideParsed.annualLabels[idx] ?? null,
+      value: fnGuideParsed.annualValues[idx] ?? null,
+    };
+  };
+
+  const annualOpProfits = recentYears.map((year) => {
+    const found = findByYear(year);
+    const fallback = (!(found?.label || Number.isFinite(found?.value))) ? findFnGuideByYear(year) : null;
+    return {
+      year,
+      label: found?.label ?? fallback?.label ?? null,
+      value: found?.value ?? fallback?.value ?? null,
+    };
+  });
+
+  const [last, prev, third, fourth, fifth] = annualOpProfits;
 
   return {
     code: itemCode,
     unit: parsed.unit || '억원',
-    lastYear,
-    prevYear,
-    thirdYear,
+    annualOpProfits,
+    lastYear: last?.year ?? null,
+    prevYear: prev?.year ?? null,
+    thirdYear: third?.year ?? null,
+    fourthYear: fourth?.year ?? null,
+    fifthYear: fifth?.year ?? null,
     lastYearLabel: last?.label ?? null,
     prevYearLabel: prev?.label ?? null,
     thirdYearLabel: third?.label ?? null,
+    fourthYearLabel: fourth?.label ?? null,
+    fifthYearLabel: fifth?.label ?? null,
     opProfitLastYear: last?.value ?? null,
     opProfitPrevYear: prev?.value ?? null,
     opProfitThirdYear: third?.value ?? null,
+    opProfitFourthYear: fourth?.value ?? null,
+    opProfitFifthYear: fifth?.value ?? null,
     eps: keyStats?.eps ?? null,
     creditRatioPct: keyStats?.creditRatioPct ?? null,
     sourceUrl: `https://finance.naver.com/item/main.naver?code=${encodeURIComponent(itemCode)}`,
@@ -1724,6 +1843,14 @@ async function getNaverSectorCached(code, ttlMs) {
 
 async function fetchNaverHtml(pathname, params) {
   const response = await naverClient.get(pathname, {
+    params,
+    responseType: 'arraybuffer',
+  });
+  return decodeNaverHtml(response.data);
+}
+
+async function fetchFnGuideHtml(pathname, params) {
+  const response = await fnGuideClient.get(pathname, {
     params,
     responseType: 'arraybuffer',
   });
@@ -3173,6 +3300,118 @@ async function getForeignFlowMaybeAuto(token, code, { ymd, marketDiv, ttlMs, deb
 
   const resolved = await getMarketDivCached(token, code, MARKET_DIV_RESOLVE_TTL_MS_DEFAULT);
   return getForeignFlowCached(token, code, { ymd, marketDiv: resolved, ttlMs, debug });
+}
+
+function computeIsinCheckDigit(isinBody) {
+  const body = String(isinBody || '').trim().toUpperCase();
+  if (!/^[A-Z0-9]+$/.test(body)) return null;
+  const expanded = body
+    .split('')
+    .map((ch) => (/\d/.test(ch) ? ch : String(ch.charCodeAt(0) - 55)))
+    .join('');
+  if (!/^\d+$/.test(expanded)) return null;
+
+  let sum = 0;
+  let shouldDouble = true;
+  for (let idx = expanded.length - 1; idx >= 0; idx--) {
+    let digit = Number(expanded[idx]);
+    if (shouldDouble) {
+      digit *= 2;
+      if (digit > 9) digit = Math.floor(digit / 10) + (digit % 10);
+    }
+    sum += digit;
+    shouldDouble = !shouldDouble;
+  }
+  return (10 - (sum % 10)) % 10;
+}
+
+function buildBestEffortKrxIsuCd(value) {
+  const raw = String(value || '').trim().toUpperCase();
+  if (/^KR[A-Z0-9]{10}$/.test(raw)) return raw;
+  const code = raw.replace(/[^0-9]/g, '').padStart(6, '0').slice(-6);
+  if (!/^\d{6}$/.test(code)) return null;
+  const body = `KR7${code}00`;
+  const checkDigit = computeIsinCheckDigit(body);
+  return Number.isInteger(checkDigit) ? `${body}${checkDigit}` : null;
+}
+
+async function getKrxShortBalanceCached(code, { ttlMs, startYmd, endYmd } = {}) {
+  const safeCode = String(code || '').trim().padStart(6, '0');
+  if (!/^\d{6}$/.test(safeCode)) {
+    const err = new Error('유효하지 않은 code');
+    err.code = 'INVALID_CODE';
+    throw err;
+  }
+
+  const isuCd = buildBestEffortKrxIsuCd(safeCode);
+  if (!isuCd) {
+    const err = new Error('KRX isuCd 계산 실패');
+    err.code = 'INVALID_ISU_CD';
+    throw err;
+  }
+
+  const cacheTtlMs = Math.max(60_000, Math.min(24 * 60 * 60 * 1000, Number(ttlMs ?? KRX_SHORT_BALANCE_TTL_MS_DEFAULT)));
+  const endDateYmd = String(endYmd || '').trim() || getKstYmd();
+  const startDateYmd = String(startYmd || '').trim() || shiftKstYmd(endDateYmd, -31) || endDateYmd;
+  const cacheKey = `${isuCd}|${startDateYmd}|${endDateYmd}`;
+  const now = Date.now();
+  const existing = krxShortBalanceCacheByKey.get(cacheKey);
+  if (existing?.value && now < existing.expiresAtMs) return existing.value;
+  if (existing?.inFlight) return existing.inFlight;
+
+  const inFlight = (async () => {
+    const form = new URLSearchParams({
+      bld: 'dbms/MDC_OUT/STAT/srt/MDCSTAT30001_OUT',
+      locale: 'ko_KR',
+      isuCd,
+      strtDd: startDateYmd,
+      endDd: endDateYmd,
+      share: '1',
+      money: '1',
+    }).toString();
+
+    const response = await axios.post('https://data.krx.co.kr/comm/bldAttendant/getJsonData.cmd', form, {
+      timeout: 20_000,
+      headers: {
+        'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8',
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/135.0.0.0 Safari/537.36',
+        Origin: 'https://data.krx.co.kr',
+        Referer: `https://data.krx.co.kr/comm/srt/srtLoader/index.cmd?screenId=MDCSTAT300&isuCd=${encodeURIComponent(safeCode)}`,
+        'X-Requested-With': 'XMLHttpRequest',
+        Accept: 'application/json, text/javascript, */*; q=0.01',
+      },
+    });
+
+    const rows = Array.isArray(response?.data?.OutBlock_1) ? response.data.OutBlock_1 : [];
+    const pickedRow = rows.find((row) => Number.isFinite(parseNumberWithCommas(row?.STR_CONST_VAL2))) || rows[0] || null;
+    const loanBalanceAmount = parseNumberWithCommas(pickedRow?.STR_CONST_VAL2);
+    const payload = {
+      code: safeCode,
+      isuCd,
+      date: String(pickedRow?.TRD_DD ?? '').trim() || null,
+      loan_balance_amount: Number.isFinite(loanBalanceAmount) ? String(Math.round(loanBalanceAmount)) : null,
+      sourceUrl: `https://data.krx.co.kr/comm/srt/srtLoader/index.cmd?screenId=MDCSTAT300&isuCd=${encodeURIComponent(safeCode)}`,
+      updatedAt: new Date().toISOString(),
+    };
+
+    krxShortBalanceCacheByKey.set(cacheKey, { value: payload, expiresAtMs: Date.now() + cacheTtlMs, inFlight: null });
+    return payload;
+  })();
+
+  krxShortBalanceCacheByKey.set(cacheKey, {
+    value: existing?.value ?? null,
+    expiresAtMs: existing?.expiresAtMs ?? 0,
+    inFlight,
+  });
+
+  try {
+    return await inFlight;
+  } finally {
+    const latest = krxShortBalanceCacheByKey.get(cacheKey);
+    if (latest?.inFlight === inFlight) {
+      krxShortBalanceCacheByKey.set(cacheKey, { ...latest, inFlight: null });
+    }
+  }
 }
 
 function parseFredGraphCsvLastTwo(csvText) {
@@ -4825,8 +5064,6 @@ app.get('/api/range-stocks', async (req, res) => {
   const ttlMs = Math.max(30_000, Math.min(30 * 60 * 1000, Number(req.query.ttlMs ?? RANGE_STOCKS_TTL_MS_DEFAULT)));
   const minPct = Number(req.query.minPct ?? -10);
   const maxPct = Number(req.query.maxPct ?? 2);
-  // 클라이언트에서 표시 개수는 별도로 제한하므로, 서버는 더 많이 내려줄 수 있게 허용합니다.
-  // (너무 큰 값은 네이버 크롤링 부담이 커질 수 있어 상한을 둡니다.)
   const limit = Math.max(1, Math.min(2000, Number(req.query.limit ?? 300)));
   const marketRaw = String(req.query.market ?? 'all').toLowerCase();
   const market = ['kospi', 'kosdaq', 'all'].includes(marketRaw) ? marketRaw : 'all';
@@ -4843,7 +5080,6 @@ app.get('/api/range-stocks', async (req, res) => {
 
   try {
     const payload = await getRangeStocksCached(ttlMs, { minPct: a, maxPct: b, limit, market });
-
     if (!includeSector) return res.json(payload);
 
     const baseItems = Array.isArray(payload?.items) ? payload.items : [];
@@ -4881,6 +5117,168 @@ app.get('/api/range-stocks', async (req, res) => {
     });
   } catch (e) {
     return res.status(500).json({ error: '전 종목 범위 조회 실패', details: e.message });
+  }
+});
+
+app.get('/api/trading-value-stocks', async (req, res) => {
+  const limit = Math.max(1, Math.min(100, Number(req.query.limit ?? 50)));
+  const rawRows = Math.max(limit, Math.min(1000, Number(req.query.rawRows ?? 300)));
+  const maxPages = Math.max(1, Math.min(30, Number(req.query.rawPages ?? 10)));
+  const ttlMs = Math.max(10_000, Math.min(5 * 60_000, Number(req.query.ttlMs ?? TRADING_VALUE_STOCKS_TTL_MS_DEFAULT)));
+  const marketRaw = String(req.query.market ?? 'all').toLowerCase();
+  const market = ['kospi', 'kosdaq', 'all'].includes(marketRaw) ? marketRaw : 'all';
+  const fidQueryParams = Object.fromEntries(
+    Object.entries(req.query)
+      .filter(([key]) => key.toLowerCase().startsWith('fid_'))
+      .map(([key, value]) => [key.toUpperCase(), String(value)])
+  );
+  const cacheKey = stableStringify({ market, limit, rawRows, maxPages, fidQueryParams });
+  const now = Date.now();
+  const existing = tradingValueStocksCacheByKey.get(cacheKey);
+  if (existing?.value && now < existing.expiresAtMs) return res.json(existing.value);
+  if (existing?.inFlight) {
+    const awaited = await existing.inFlight;
+    return res.json(awaited);
+  }
+
+  const inFlight = (async () => {
+    const token = await getAccessToken();
+    const url = 'https://openapi.koreainvestment.com:9443/uapi/domestic-stock/v1/quotations/volume-rank';
+    const trId = process.env.KIS_TR_ID_VOLUME_RANK || 'FHPST01710000';
+    const allRaw = [];
+    const scopeInputs = fidQueryParams.FID_INPUT_ISCD
+      ? [fidQueryParams.FID_INPUT_ISCD]
+      : market === 'kospi'
+        ? ['0001']
+        : market === 'kosdaq'
+          ? ['1001']
+          : ['0001', '1001'];
+
+    for (const scopeInput of scopeInputs) {
+      let ctx = null;
+      for (let page = 1; page <= maxPages && allRaw.length < rawRows; page += 1) {
+        const response = await axios.get(url, {
+          headers: {
+            authorization: `Bearer ${token}`,
+            appkey: process.env.KIS_APP_KEY,
+            appsecret: process.env.KIS_APP_SECRET,
+            tr_id: trId,
+            custtype: String(req.query.custtype ?? process.env.KIS_CUSTTYPE ?? 'P'),
+            tr_cont: page === 1 ? 'N' : 'Y',
+          },
+          params: {
+            ...fidQueryParams,
+            FID_COND_MRKT_DIV_CODE: fidQueryParams.FID_COND_MRKT_DIV_CODE ?? 'J',
+            FID_COND_SCR_DIV_CODE: fidQueryParams.FID_COND_SCR_DIV_CODE ?? String(req.query.scr ?? '20171'),
+            FID_INPUT_ISCD: scopeInput,
+            FID_DIV_CLS_CODE: fidQueryParams.FID_DIV_CLS_CODE ?? String(req.query.fid_div_cls_code ?? '0'),
+            FID_BLNG_CLS_CODE: fidQueryParams.FID_BLNG_CLS_CODE ?? String(req.query.fid_blng_cls_code ?? '0'),
+            FID_TRGT_CLS_CODE: fidQueryParams.FID_TRGT_CLS_CODE ?? String(req.query.fid_trgt_cls_code ?? '111111111'),
+            FID_TRGT_EXLS_CLS_CODE: fidQueryParams.FID_TRGT_EXLS_CLS_CODE ?? String(req.query.fid_trgt_exls_cls_code ?? '000000'),
+            FID_INPUT_PRICE_1: fidQueryParams.FID_INPUT_PRICE_1 ?? String(req.query.fid_input_price_1 ?? '0'),
+            FID_INPUT_PRICE_2: fidQueryParams.FID_INPUT_PRICE_2 ?? String(req.query.fid_input_price_2 ?? '0'),
+            FID_VOL_CNT: fidQueryParams.FID_VOL_CNT ?? String(req.query.fid_vol_cnt ?? '0'),
+            FID_INPUT_CNT_1: fidQueryParams.FID_INPUT_CNT_1 ?? String(req.query.fid_input_cnt_1 ?? Math.max(limit, 100)),
+            ...(page === 1 ? {} : (ctx ?? {})),
+          },
+          timeout: 15_000,
+        });
+
+        const data = response.data;
+        if (data?.rt_cd && String(data.rt_cd) !== '0') {
+          throw new Error(data?.msg1 || '거래대금 랭킹 조회 실패');
+        }
+
+        const pageRaw = pickFirstArrayFromResponse(data) || [];
+        if (pageRaw.length > 0) allRaw.push(...pageRaw);
+
+        const nextCtx = extractKisContinuationCtx(data);
+        if (!nextCtx) break;
+        if (ctx && nextCtx.ctx_area_fk200 === ctx.ctx_area_fk200 && nextCtx.ctx_area_nk200 === ctx.ctx_area_nk200) break;
+        ctx = nextCtx;
+        if (pageRaw.length === 0) break;
+      }
+    }
+
+    let allowedCodes = null;
+    if (market !== 'all') {
+      const marketItems = await fetchNaverMarketSumAll(market === 'kospi' ? 0 : 1);
+      allowedCodes = new Set(
+        (marketItems || [])
+          .map((item) => String(item?.code ?? '').trim().padStart(6, '0'))
+          .filter((code) => /^[0-9]{6}$/.test(code))
+      );
+    }
+
+    const deduped = new Map();
+    for (const item of allRaw) {
+      const code = String(item?.mksc_shrn_iscd ?? item?.stck_shrn_iscd ?? item?.code ?? '').trim().padStart(6, '0');
+      if (!/^[0-9]{6}$/.test(code)) continue;
+      if (allowedCodes && !allowedCodes.has(code)) continue;
+      if (deduped.has(code)) continue;
+
+      const tradingValueNum = parseNumberWithCommas(item?.acml_tr_pbmn);
+      const volumeNum = parseNumberWithCommas(item?.acml_vol);
+      const pctNum = Number(item?.prdy_ctrt);
+
+      deduped.set(code, {
+        code,
+        name: item?.hts_kor_isnm ?? item?.stck_name ?? item?.isnm ?? item?.name ?? code,
+        stck_prpr: item?.stck_prpr ?? null,
+        prdy_vrss: item?.prdy_vrss ?? null,
+        prdy_ctrt: Number.isFinite(pctNum) ? String(pctNum) : (item?.prdy_ctrt ?? null),
+        acml_vol: Number.isFinite(volumeNum) ? String(Math.round(volumeNum)) : (item?.acml_vol ?? null),
+        acml_tr_pbmn: Number.isFinite(tradingValueNum) ? String(Math.round(tradingValueNum)) : (item?.acml_tr_pbmn ?? null),
+      });
+    }
+
+    const items = Array.from(deduped.values())
+      .sort((a, b) => {
+        const av = parseNumberWithCommas(a?.acml_tr_pbmn);
+        const bv = parseNumberWithCommas(b?.acml_tr_pbmn);
+        const aFinite = Number.isFinite(av);
+        const bFinite = Number.isFinite(bv);
+        if (!aFinite && !bFinite) return String(a?.code ?? '').localeCompare(String(b?.code ?? ''), 'ko', { numeric: true, sensitivity: 'base' });
+        if (!aFinite) return 1;
+        if (!bFinite) return -1;
+        if (bv !== av) return bv - av;
+        return String(a?.code ?? '').localeCompare(String(b?.code ?? ''), 'ko', { numeric: true, sensitivity: 'base' });
+      })
+      .slice(0, limit);
+
+    return {
+      market,
+      count: items.length,
+      items,
+      updatedAt: new Date().toISOString(),
+      source: 'kis-volume-rank',
+    };
+  })();
+
+  tradingValueStocksCacheByKey.set(cacheKey, {
+    value: existing?.value ?? null,
+    expiresAtMs: existing?.expiresAtMs ?? 0,
+    inFlight,
+  });
+
+  try {
+    const payload = await inFlight;
+    tradingValueStocksCacheByKey.set(cacheKey, {
+      value: payload,
+      expiresAtMs: Date.now() + ttlMs,
+      inFlight: null,
+    });
+    return res.json(payload);
+  } catch (e) {
+    const latest = tradingValueStocksCacheByKey.get(cacheKey);
+    if (latest?.inFlight === inFlight) {
+      tradingValueStocksCacheByKey.set(cacheKey, {
+        value: latest?.value ?? null,
+        expiresAtMs: latest?.expiresAtMs ?? 0,
+        inFlight: null,
+      });
+    }
+    return res.status(500).json({ error: '거래대금 상위 종목 조회 실패', details: e?.message || String(e) });
   }
 });
 
@@ -5120,7 +5518,7 @@ app.get('/api/sideways-scores', async (req, res) => {
   }
 });
 
-// ── 영업이익(최근 3년, 네이버 기업실적분석 파싱) ─────────
+// ── 영업이익(최근 5년, 네이버 + FnGuide 보강) ─────────
 // GET /api/op-profits?codes=005930,000660
 app.get('/api/op-profits', async (req, res) => {
   const raw = String(req.query.codes ?? '').trim();
@@ -5160,18 +5558,30 @@ app.get('/api/op-profits', async (req, res) => {
         return await getNaverOperatingProfitCached(code, ttlMs);
       } catch {
         const nowYear = new Date().getFullYear();
+        const annualOpProfits = Array.from({ length: 5 }, (_, idx) => ({
+          year: nowYear - (idx + 1),
+          label: null,
+          value: null,
+        }));
         return {
           code,
           unit: '억원',
-          lastYear: nowYear - 1,
-          prevYear: nowYear - 2,
-          thirdYear: nowYear - 3,
+          annualOpProfits,
+          lastYear: annualOpProfits[0].year,
+          prevYear: annualOpProfits[1].year,
+          thirdYear: annualOpProfits[2].year,
+          fourthYear: annualOpProfits[3].year,
+          fifthYear: annualOpProfits[4].year,
           lastYearLabel: null,
           prevYearLabel: null,
           thirdYearLabel: null,
+          fourthYearLabel: null,
+          fifthYearLabel: null,
           opProfitLastYear: null,
           opProfitPrevYear: null,
           opProfitThirdYear: null,
+          opProfitFourthYear: null,
+          opProfitFifthYear: null,
           eps: null,
           creditRatioPct: null,
           sourceUrl: `https://finance.naver.com/item/main.naver?code=${encodeURIComponent(code)}`,
@@ -5280,6 +5690,70 @@ app.get('/api/foreign-flows', async (req, res) => {
   }
 });
 
+// ── 공매도 순보유잔고 금액(배치, KRX) ─────────────────
+// GET /api/loan-balances?codes=005930,000660
+const handleLoanBalances = async (req, res) => {
+  res.set('Cache-Control', 'no-store');
+
+  const raw = String(req.query.codes ?? '').trim();
+  if (!raw) return res.status(400).json({ error: 'codes 파라미터가 필요합니다.' });
+
+  const codesAll = Array.from(
+    new Set(
+      raw
+        .split(/[\s,]+/)
+        .map(s => String(s || '').trim())
+        .filter(Boolean)
+        .map(s => s.padStart(6, '0'))
+        .filter(s => /^[0-9]{6}$/.test(s))
+    )
+  );
+  if (codesAll.length === 0) return res.status(400).json({ error: '유효한 codes가 없습니다.' });
+  if (codesAll.length > 120) return res.status(400).json({ error: 'codes는 한 번에 최대 120개까지 가능합니다.' });
+
+  const ttlMs = Math.max(60_000, Math.min(24 * 60 * 60 * 1000, Number(req.query.ttlMs ?? KRX_SHORT_BALANCE_TTL_MS_DEFAULT)));
+  const concurrency = Math.max(1, Math.min(6, Number(req.query.concurrency ?? 3)));
+
+  try {
+    const universeTtlMs = clampUniverseTtlMs(req.query.universeTtlMs ?? RESOLVE_STOCK_UNIVERSE_TTL_MS_DEFAULT);
+    const codes = await filterCodesByUniverse(codesAll, universeTtlMs);
+    const skippedCount = Math.max(0, codesAll.length - codes.length);
+
+    if (codes.length === 0) {
+      return res.json({ count: 0, skippedCount, items: [], updatedAt: new Date().toISOString() });
+    }
+
+    const items = await mapWithConcurrency(codes, concurrency, async (code) => {
+      try {
+        return await getKrxShortBalanceCached(code, { ttlMs });
+      } catch {
+        return {
+          code,
+          isuCd: null,
+          date: null,
+          loan_balance_amount: null,
+          sourceUrl: `https://data.krx.co.kr/comm/srt/srtLoader/index.cmd?screenId=MDCSTAT300&isuCd=${encodeURIComponent(code)}`,
+          updatedAt: new Date().toISOString(),
+        };
+      }
+    });
+
+    return res.json({ count: items.length, skippedCount, items, updatedAt: new Date().toISOString() });
+  } catch (e) {
+    const diagnostic = {
+      message: e.message,
+      code: e.code,
+      status: e.response?.status,
+      data: e.response?.data,
+    };
+    console.error('loan-balances 배치 조회 실패:', diagnostic);
+    return res.status(500).json({ error: '대차거래잔고 조회 실패', details: diagnostic });
+  }
+};
+
+app.get('/api/loan-balances', handleLoanBalances);
+app.get('/api/short-balances', handleLoanBalances);
+
 // ── 목표가(배치) 조회 ─────────────────────────────────
 // range-stocks는 종목 리스트만 빠르게 내려주고,
 // 목표가/증권사 리포트 기반 목표가는 별도 배치 API로 천천히 채웁니다.
@@ -5296,35 +5770,34 @@ async function computePerPbrTargetsForCode(code, params) {
     Math.min(24 * 60 * 60 * 1000, Number(params?.epsTtlMs ?? params?.salesTtlMs ?? 6 * 60 * 60 * 1000))
   );
 
+  const token = await getAccessToken();
+  const price = await getInquirePriceCached(token, c, priceTtlMs);
+  const eps = Number(price?.eps);
+  const bps = Number(price?.bps);
+  const currentPrice = parseKrwPrice(price?.stck_prpr);
+
+  const hasMeaningfulEps = Number.isFinite(eps) && eps > 0;
+  const hasMeaningfulBps = Number.isFinite(bps) && bps > 0;
+
+  let epsConsensus = null;
   try {
-    const token = await getAccessToken();
-    const price = await getInquirePriceCached(token, c, priceTtlMs);
-    const eps = Number(price?.eps);
-    const bps = Number(price?.bps);
-    const currentPrice = parseKrwPrice(price?.stck_prpr);
-
-    const hasMeaningfulEps = Number.isFinite(eps) && eps > 0;
-    const hasMeaningfulBps = Number.isFinite(bps) && bps > 0;
-
-    let currentPer = null;
-    try {
-      const epsInfo = await getNaverConsensusEpsEstimateCached(c, epsTtlMs);
-      const epsConsensus = Number(epsInfo?.epsConsensus);
-      // PER = 현재가 / EPS(컨센서스 추정치)
-      currentPer = (hasMeaningfulEps && Number.isFinite(currentPrice) && currentPrice > 0 && Number.isFinite(epsConsensus) && epsConsensus > 0)
-        ? (currentPrice / epsConsensus)
-        : null;
-    } catch {
-      currentPer = null;
-    }
-
-    const perTarget = (hasMeaningfulEps && Number.isFinite(targetPer)) ? String(Math.round(eps * targetPer)) : null;
-    const pbrTarget = (hasMeaningfulBps && Number.isFinite(targetPbr)) ? String(Math.round(bps * targetPbr)) : null;
-
-    return { code: c, target_prc: perTarget, target_prc_pbr: pbrTarget, current_per: currentPer };
+    const epsInfo = await getNaverConsensusEpsEstimateCached(c, epsTtlMs);
+    const parsedConsensus = Number(epsInfo?.epsConsensus);
+    epsConsensus = Number.isFinite(parsedConsensus) && parsedConsensus > 0 ? parsedConsensus : null;
   } catch {
-    return { code: c, target_prc: null, target_prc_pbr: null, current_per: null };
+    epsConsensus = null;
   }
+
+  // KIS EPS가 비어 있는 종목은 네이버 컨센서스 EPS로 목표가 계산을 보완합니다.
+  const effectivePerBase = hasMeaningfulEps ? eps : epsConsensus;
+  const currentPer = (Number.isFinite(currentPrice) && currentPrice > 0 && Number.isFinite(epsConsensus) && epsConsensus > 0)
+    ? (currentPrice / epsConsensus)
+    : null;
+
+  const perTarget = (Number.isFinite(effectivePerBase) && Number.isFinite(targetPer)) ? String(Math.round(effectivePerBase * targetPer)) : null;
+  const pbrTarget = (hasMeaningfulBps && Number.isFinite(targetPbr)) ? String(Math.round(bps * targetPbr)) : null;
+
+  return { code: c, target_prc: perTarget, target_prc_pbr: pbrTarget, current_per: currentPer };
 }
 
 async function computeBrokerTargetsForCode(code, params) {
@@ -5337,21 +5810,17 @@ async function computeBrokerTargetsForCode(code, params) {
   const brokerMaxNidsPerBroker = Math.max(1, Math.min(10, Number(params?.brokerMaxNidsPerBroker ?? 5)));
   const brokerAllowFallbackAnyBroker = parseBooleanParam(params?.brokerAllowFallbackAnyBroker, true);
 
-  try {
-    const brokerTps = await getBrokerTargetPricesFromNaverCached(c, brokerTargetPriceTtlMs, {
-      maxPages: brokerMaxPages,
-      maxNidsPerBroker: brokerMaxNidsPerBroker,
-      allowFallbackAnyBroker: brokerAllowFallbackAnyBroker,
-    });
-    return {
-      code: c,
-      kb_tp: brokerTps?.kb_tp ?? null,
-      nh_tp: brokerTps?.nh_tp ?? null,
-      kis_tp: brokerTps?.kis_tp ?? null,
-    };
-  } catch {
-    return { code: c, kb_tp: null, nh_tp: null, kis_tp: null };
-  }
+  const brokerTps = await getBrokerTargetPricesFromNaverCached(c, brokerTargetPriceTtlMs, {
+    maxPages: brokerMaxPages,
+    maxNidsPerBroker: brokerMaxNidsPerBroker,
+    allowFallbackAnyBroker: brokerAllowFallbackAnyBroker,
+  });
+  return {
+    code: c,
+    kb_tp: brokerTps?.kb_tp ?? null,
+    nh_tp: brokerTps?.nh_tp ?? null,
+    kis_tp: brokerTps?.kis_tp ?? null,
+  };
 }
 
 app.get('/api/targets', async (req, res) => {
@@ -5374,6 +5843,7 @@ app.get('/api/targets', async (req, res) => {
 
   const withPerPbr = parseBooleanParam(req.query.withPerPbr, true);
   const withBrokers = parseBooleanParam(req.query.withBrokers, true);
+  const withLoanBalance = parseBooleanParam(req.query.withLoanBalance, true);
   const cacheOnly = parseBooleanParam(req.query.cacheOnly, false);
 
   const targetPer = Number(req.query.targetPer ?? process.env.TARGET_PER ?? 15);
@@ -5401,6 +5871,7 @@ app.get('/api/targets', async (req, res) => {
 
   const apiPerTtlMs = Math.max(10_000, Math.min(60 * 60_000, Number(req.query.apiPerTtlMs ?? TARGETS_API_PER_TTL_MS_DEFAULT)));
   const apiBrokerTtlMs = Math.max(10_000, Math.min(6 * 60 * 60_000, Number(req.query.apiBrokerTtlMs ?? TARGETS_API_BROKER_TTL_MS_DEFAULT)));
+  const loanBalanceTtlMs = Math.max(60_000, Math.min(24 * 60 * 60 * 1000, Number(req.query.loanBalanceTtlMs ?? KRX_SHORT_BALANCE_TTL_MS_DEFAULT)));
 
   try {
     const universeTtlMs = clampUniverseTtlMs(req.query.universeTtlMs ?? RESOLVE_STOCK_UNIVERSE_TTL_MS_DEFAULT);
@@ -5415,7 +5886,7 @@ app.get('/api/targets', async (req, res) => {
     }
 
     const now = Date.now();
-    const items = codes.map(code => {
+    const items = await mapWithConcurrency(codes, 3, async (code) => {
       const pending = [];
 
       let perOut = { code, target_prc: null, target_prc_pbr: null, current_per: null };
@@ -5448,6 +5919,16 @@ app.get('/api/targets', async (req, res) => {
         }
       }
 
+      let loanBalanceAmount = null;
+      if (withLoanBalance) {
+        try {
+          const loanOut = await getKrxShortBalanceCached(code, { ttlMs: loanBalanceTtlMs });
+          loanBalanceAmount = loanOut?.loan_balance_amount ?? null;
+        } catch {
+          loanBalanceAmount = null;
+        }
+      }
+
       return {
         code,
         target_prc: perOut?.target_prc ?? null,
@@ -5461,6 +5942,7 @@ app.get('/api/targets', async (req, res) => {
         kb_tp: brOut?.kb_tp ?? null,
         nh_tp: brOut?.nh_tp ?? null,
         kis_tp: brOut?.kis_tp ?? null,
+        loan_balance_amount: loanBalanceAmount,
         pending,
         serverNowMs: now,
       };
@@ -5825,6 +6307,7 @@ app.get('/api/decliners', async (req, res) => {
             prdy_vrss: item.prdy_vrss,
             prdy_ctrt: Number.isFinite(pct) ? String(pct) : (pctStr ?? ''),
             acml_vol: item.acml_vol,
+            acml_tr_pbmn: item.acml_tr_pbmn,
             _pct: pct,
           };
         })
