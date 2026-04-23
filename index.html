@@ -177,7 +177,17 @@
 			padding: 12px 14px;
 			border-bottom: 1px solid rgba(255,255,255,.10);
 		}
+		.modalHeaderMain {
+			display: flex;
+			flex-direction: column;
+			gap: 4px;
+			min-width: 0;
+		}
 		.modalTitle { font-weight: 800; }
+		.modalUpdatedAt {
+			font-size: 12px;
+			line-height: 1.2;
+		}
 		.modalBody { padding: 12px 14px; overflow: auto; max-height: calc(78vh - 54px); }
 		.modalHeader .actions { display: flex; gap: 8px; align-items: center; }
 
@@ -467,7 +477,10 @@
 	<div id="usCpiModalOverlay" class="modalOverlay" aria-hidden="true">
 		<div id="usCpiModalPanel" class="modalPanel" role="dialog" aria-modal="true">
 			<div class="modalHeader">
-				<div class="modalTitle">미국 CPI (최근 1년 YoY%)</div>
+				<div class="modalHeaderMain">
+					<div class="modalTitle">미국 CPI (최근 1년 YoY%)</div>
+					<div class="muted modalUpdatedAt" id="usCpiModalUpdatedAt">최근 갱신: -</div>
+				</div>
 				<div class="actions">
 					<button class="pill" id="usCpiModalCloseBtn">닫기</button>
 				</div>
@@ -483,7 +496,10 @@
 	<div id="usRateModalOverlay" class="modalOverlay" aria-hidden="true">
 		<div id="usRateModalPanel" class="modalPanel" role="dialog" aria-modal="true">
 			<div class="modalHeader">
-				<div class="modalTitle">미국 기준금리 (최근 1년)</div>
+				<div class="modalHeaderMain">
+					<div class="modalTitle">미국 기준금리 (최근 1년)</div>
+					<div class="muted modalUpdatedAt" id="usRateModalUpdatedAt">최근 갱신: -</div>
+				</div>
 				<div class="actions">
 					<button class="pill" id="usRateModalCloseBtn">닫기</button>
 				</div>
@@ -499,7 +515,10 @@
 	<div id="vixModalOverlay" class="modalOverlay" aria-hidden="true">
 		<div id="vixModalPanel" class="modalPanel" role="dialog" aria-modal="true">
 			<div class="modalHeader">
-				<div class="modalTitle">빅스지수 (최근 3년)</div>
+				<div class="modalHeaderMain">
+					<div class="modalTitle">빅스지수 (최근 3년)</div>
+					<div class="muted modalUpdatedAt" id="vixModalUpdatedAt">최근 갱신: -</div>
+				</div>
 				<div class="actions">
 					<button class="pill" id="vixModalCloseBtn">닫기</button>
 				</div>
@@ -515,7 +534,10 @@
 	<div id="stockChartModalOverlay" class="modalOverlay" aria-hidden="true">
 		<div id="stockChartModalPanel" class="modalPanel" role="dialog" aria-modal="true">
 			<div class="modalHeader">
-				<div class="modalTitle" id="stockChartModalTitle">차트</div>
+				<div class="modalHeaderMain">
+					<div class="modalTitle" id="stockChartModalTitle">차트</div>
+					<div class="muted modalUpdatedAt" id="stockChartModalUpdatedAt">최근 갱신: -</div>
+				</div>
 				<div class="actions">
 					<div id="stockChartModalTabs" class="tabs">
 						<button class="chartTab active" type="button" data-kind="day">일봉</button>
@@ -546,7 +568,10 @@
 	<div id="basketModalOverlay" class="modalOverlay" aria-hidden="true">
 		<div id="basketModalPanel" class="modalPanel" role="dialog" aria-modal="true">
 			<div class="modalHeader">
-				<div class="modalTitle">Basket (엑셀에서 코드 불러오기)</div>
+				<div class="modalHeaderMain">
+					<div class="modalTitle">Basket (엑셀에서 코드 불러오기)</div>
+					<div class="muted modalUpdatedAt" id="basketModalUpdatedAt">최근 갱신: -</div>
+				</div>
 				<div class="actions">
 					<button class="pill" id="basketClearBtn" type="button">해제</button>
 					<button class="pill" id="basketModalCloseBtn" type="button">닫기</button>
@@ -566,7 +591,10 @@
 	<div id="favoritesModalOverlay" class="modalOverlay" aria-hidden="true">
 		<div id="favoritesModalPanel" class="modalPanel" role="dialog" aria-modal="true">
 			<div class="modalHeader">
-				<div class="modalTitle">관심종목</div>
+				<div class="modalHeaderMain">
+					<div class="modalTitle">관심종목</div>
+					<div class="muted modalUpdatedAt" id="favoritesModalUpdatedAt">최근 갱신: -</div>
+				</div>
 				<div class="actions">
 					<button class="pill" id="favoritesSaveBtn" type="button" data-busy-disable="1">저장</button>
 					<button class="pill" id="favoritesDeleteBtn" type="button" data-busy-disable="1">삭제</button>
@@ -584,7 +612,10 @@
 	<div id="sectorModalOverlay" class="modalOverlay" aria-hidden="true">
 		<div id="sectorModalPanel" class="modalPanel" role="dialog" aria-modal="true">
 			<div class="modalHeader">
-				<div class="modalTitle">섹터종목</div>
+				<div class="modalHeaderMain">
+					<div class="modalTitle">섹터종목</div>
+					<div class="muted modalUpdatedAt" id="sectorModalUpdatedAt">최근 갱신: -</div>
+				</div>
 				<div class="actions">
 					<button class="pill" id="sectorModalCloseBtn" type="button">닫기</button>
 				</div>
@@ -668,7 +699,10 @@
 	<div id="tradingModalOverlay" class="modalOverlay" aria-hidden="true">
 		<div id="tradingModalPanel" class="modalPanel" role="dialog" aria-modal="true">
 			<div class="modalHeader">
-				<div class="modalTitle">트레이딩종목</div>
+				<div class="modalHeaderMain">
+					<div class="modalTitle">트레이딩종목</div>
+					<div class="muted modalUpdatedAt" id="tradingModalUpdatedAt">최근 갱신: -</div>
+				</div>
 				<div class="actions">
 					<button class="pill" id="tradingRefreshBtn" type="button" data-busy-disable="1">재검색</button>
 					<button class="pill" id="tradingModalCloseBtn" type="button">닫기</button>
@@ -688,7 +722,10 @@
 	<div id="tradingValueModalOverlay" class="modalOverlay" aria-hidden="true">
 		<div id="tradingValueModalPanel" class="modalPanel" role="dialog" aria-modal="true">
 			<div class="modalHeader">
-				<div class="modalTitle">거래대금</div>
+				<div class="modalHeaderMain">
+					<div class="modalTitle">거래대금</div>
+					<div class="muted modalUpdatedAt" id="tradingValueModalUpdatedAt">최근 갱신: -</div>
+				</div>
 				<div class="actions">
 					<button class="pill" id="tradingValueRefreshBtn" type="button" data-busy-disable="1">새로고침</button>
 					<button class="pill" id="tradingValueModalCloseBtn" type="button">닫기</button>
@@ -920,12 +957,84 @@
 		const FAVORITES_AUTO_REFRESH_INTERVAL_MS = 12_000;
 
 		let sectorModalOpen = false;
+		function isModalDisplayActive(overlayId, isOpen) {
+			if (!isOpen) return false;
+			if (document.visibilityState !== 'visible') return false;
+			const overlay = document.getElementById(overlayId);
+			if (!overlay) return false;
+			if (!overlay.classList.contains('open')) return false;
+			return overlay.getAttribute('aria-hidden') !== 'true';
+		}
+		function isFavoritesModalDisplayActive() {
+			return isModalDisplayActive('favoritesModalOverlay', favoritesModalOpen);
+		}
+		function isTradingModalDisplayActive() {
+			return isModalDisplayActive('tradingModalOverlay', tradingModalOpen);
+		}
+		function isTradingValueModalDisplayActive() {
+			return isModalDisplayActive('tradingValueModalOverlay', tradingValueModalOpen);
+		}
+		function isUsCpiModalDisplayActive() {
+			return isModalDisplayActive('usCpiModalOverlay', usCpiModalOpen);
+		}
+		function isUsRateModalDisplayActive() {
+			return isModalDisplayActive('usRateModalOverlay', usRateModalOpen);
+		}
+		function isVixModalDisplayActive() {
+			return isModalDisplayActive('vixModalOverlay', vixModalOpen);
+		}
+		function isStockChartModalDisplayActive() {
+			return isModalDisplayActive('stockChartModalOverlay', stockChartModalOpen);
+		}
+		function setModalUpdatedAt(elementId, value = null, { label = '최근 갱신' } = {}) {
+			const el = document.getElementById(elementId);
+			if (!el) return;
+			if (!value) {
+				el.textContent = `${label}: -`;
+				return;
+			}
+			const d = value instanceof Date ? value : new Date(value);
+			el.textContent = `${label}: ${Number.isNaN(d.getTime()) ? '-' : d.toLocaleString()}`;
+		}
+		async function refreshFavoritesModalVisibleData({ force = false } = {}) {
+			if (!isFavoritesModalDisplayActive()) return;
+			const codes = Array.from(selectedCodes);
+			const myEpoch = favoritesModalEpoch;
+			if (codes.length === 0) {
+				try { renderFavoritesModal(); } catch {}
+				return;
+			}
+			await ensureFavoritesSnapshotsLoaded(codes, { force }).catch(() => {});
+			if (!isFavoritesModalDisplayActive() || favoritesModalEpoch !== myEpoch) return;
+			setModalUpdatedAt('favoritesModalUpdatedAt', new Date());
+			try { renderFavoritesModal(); } catch {}
+		}
+		function refreshStockChartModalVisibleData() {
+			if (!isStockChartModalDisplayActive()) return;
+			const code = String(stockChartModalCode ?? '').trim().padStart(6, '0');
+			if (!/^[0-9]{6}$/.test(code)) return;
+			setStockChartModalKind(stockChartModalKind || 'day');
+			setModalUpdatedAt('stockChartModalUpdatedAt', new Date());
+			loadStockChartModalOpProfits(code).catch(() => {});
+		}
+		function refreshVisiblePopupDataOnResume() {
+			if (document.visibilityState !== 'visible') return;
+			if (isFavoritesModalDisplayActive()) refreshFavoritesModalVisibleData({ force: true }).catch(() => {});
+			if (isTradingModalDisplayActive()) refreshTradingCandidates().catch(() => {});
+			if (isTradingValueModalDisplayActive()) refreshTradingValueCandidates().catch(() => {});
+			if (isUsCpiModalDisplayActive()) openUsCpiModal().catch(() => {});
+			if (isUsRateModalDisplayActive()) openUsRateModal().catch(() => {});
+			if (isVixModalDisplayActive()) openVixModal().catch(() => {});
+			if (isStockChartModalDisplayActive()) refreshStockChartModalVisibleData();
+		}
+
 		function setSectorModalVisible(visible) {
 			sectorModalOpen = !!visible;
 			const overlay = document.getElementById('sectorModalOverlay');
 			if (!overlay) return;
 			overlay.classList.toggle('open', sectorModalOpen);
 			overlay.setAttribute('aria-hidden', sectorModalOpen ? 'false' : 'true');
+			if (sectorModalOpen) setModalUpdatedAt('sectorModalUpdatedAt', new Date());
 		}
 
 		let tradingModalOpen = false;
@@ -1132,6 +1241,7 @@
 				const j = await r.json().catch(() => ({}));
 				if (!r.ok || j?.ok === false) throw new Error(j?.error || `HTTP ${r.status}`);
 				if (hintEl) hintEl.textContent = `저장 완료: ${codes.length.toLocaleString('ko-KR')}개`;
+				setModalUpdatedAt('favoritesModalUpdatedAt', new Date());
 				return true;
 			} catch (e) {
 				if (hintEl) hintEl.textContent = `저장 실패: ${e?.message || String(e)}`;
@@ -1151,6 +1261,7 @@
 				const j = await r.json().catch(() => ({}));
 				if (!r.ok || j?.ok === false) throw new Error(j?.error || `HTTP ${r.status}`);
 				if (hintEl) hintEl.textContent = `${prefix}: ${codes.length.toLocaleString('ko-KR')}개`;
+				setModalUpdatedAt('favoritesModalUpdatedAt', new Date());
 				return true;
 			} catch (e) {
 				if (hintEl) hintEl.textContent = `${prefix} 실패: ${e?.message || String(e)}`;
@@ -1166,7 +1277,8 @@
 			return favoritesSnapshotByCode.get(c) || null;
 		}
 
-		async function ensureFavoritesSnapshotsLoaded(codesLike) {
+		async function ensureFavoritesSnapshotsLoaded(codesLike, options = {}) {
+			const { force = false } = options;
 			const codes = Array.from(codesLike || [])
 				.map(c => String(c ?? '').trim().padStart(6, '0'))
 				.filter(c => /^[0-9]{6}$/.test(c));
@@ -1188,7 +1300,7 @@
 
 			// 이미 fresh 캐시로 모두 커버되면 네트워크 호출 생략
 			// 단, 메인에 가격이 있는 코드는 스냅샷 대상에서 제외
-			const missingOrStale = codes.filter(c => !getFreshFavoritesSnapshot(c) && !hasMainNumericPrice(c));
+			const missingOrStale = codes.filter(c => (force || !getFreshFavoritesSnapshot(c)) && !hasMainNumericPrice(c));
 			if (missingOrStale.length === 0) return null;
 
 			favoritesSnapshotsInFlight = (async () => {
@@ -1226,14 +1338,15 @@
 		function startFavoritesAutoRefresh(epoch) {
 			stopFavoritesAutoRefresh();
 			favoritesAutoRefreshTimer = setInterval(() => {
-				if (!favoritesModalOpen) return;
+				if (!isFavoritesModalDisplayActive()) return;
 				if (favoritesModalEpoch !== epoch) return;
 				const codes = Array.from(selectedCodes);
 				if (!codes || codes.length === 0) return;
 				ensureFavoritesSnapshotsLoaded(codes)
 					.then((started) => {
 						if (!started) return;
-						if (favoritesModalOpen && favoritesModalEpoch === epoch) {
+						if (isFavoritesModalDisplayActive() && favoritesModalEpoch === epoch) {
+							setModalUpdatedAt('favoritesModalUpdatedAt', new Date());
 							try { renderFavoritesModal(); } catch {}
 						}
 					})
@@ -1242,6 +1355,7 @@
 		}
 
 		function renderFavoritesModal() {
+			if (!isFavoritesModalDisplayActive()) return;
 			const hintEl = document.getElementById('favoritesModalHint');
 			const contentEl = document.getElementById('favoritesModalContent');
 			if (!contentEl) return;
@@ -1336,6 +1450,7 @@
 			if (favoritesModalOpen) {
 				const myEpoch = ++favoritesModalEpoch;
 				startFavoritesAutoRefresh(myEpoch);
+				setModalUpdatedAt('favoritesModalUpdatedAt', new Date());
 				// 1) 1차 렌더: 일단 화면에 팝업을 띄우고 로딩 표시
 				try {
 					const contentEl = document.getElementById('favoritesModalContent');
@@ -1350,10 +1465,11 @@
 				(async () => {
 					try {
 						if (!favoritesLoadedOnce) await loadFavoritesFromServer().catch(() => {});
-						await ensureFavoritesSnapshotsLoaded(Array.from(selectedCodes)).catch(() => {});
+						await ensureFavoritesSnapshotsLoaded(Array.from(selectedCodes), { force: true }).catch(() => {});
 					} finally {
 						// 모달이 계속 열려있고 같은 epoch일 때만 2차 렌더
-						if (favoritesModalOpen && favoritesModalEpoch === myEpoch) {
+						if (isFavoritesModalDisplayActive() && favoritesModalEpoch === myEpoch) {
+							setModalUpdatedAt('favoritesModalUpdatedAt', new Date());
 							try { renderFavoritesModal(); } catch {}
 						}
 					}
@@ -1577,6 +1693,7 @@
 				const hint = document.getElementById('basketHintText');
 				if (status) status.textContent = '엑셀 파일을 선택해 주세요 (코드 컬럼 필요)';
 				if (hint) hint.textContent = basketActive ? `적용중: ${basketCodes.size.toLocaleString('ko-KR')}개 코드` : '미적용';
+				setModalUpdatedAt('basketModalUpdatedAt', new Date());
 			}
 		}
 
@@ -1620,6 +1737,7 @@
 				basketActive = true;
 				if (hint) hint.textContent = `적용중: ${basketCodes.size.toLocaleString('ko-KR')}개 코드`;
 				if (status) status.textContent = `완료: ${file.name}`;
+				setModalUpdatedAt('basketModalUpdatedAt', new Date());
 				renderTable();
 			} catch (e) {
 				basketActive = false;
@@ -1877,13 +1995,13 @@
 					</tr>
 				`;
 			}).join('');
-			if (favoritesModalOpen) {
+			if (isFavoritesModalDisplayActive()) {
 				try { renderFavoritesModal(); } catch {}
 			}
-			if (tradingModalOpen) {
+			if (isTradingModalDisplayActive()) {
 				try { renderTradingModal(); } catch {}
 			}
-			if (tradingValueModalOpen) {
+			if (isTradingValueModalDisplayActive()) {
 				try { renderTradingValueModal(); } catch {}
 			}
 		}
@@ -2647,6 +2765,7 @@
 
 		async function openUsCpiModal() {
 			setUsCpiModalVisible(true);
+			if (!isUsCpiModalDisplayActive()) return;
 			const hint = document.getElementById('usCpiHint');
 			if (hint) hint.textContent = '로딩 중...';
 			try {
@@ -2660,6 +2779,7 @@
 				});
 				const labels = series.labels;
 				const values = series.values;
+				if (!isUsCpiModalDisplayActive()) return;
 				const ctx = document.getElementById('usCpiChart')?.getContext?.('2d');
 				if (ctx && window.Chart) {
 					if (usCpiChart) { try { usCpiChart.destroy(); } catch {} usCpiChart = null; }
@@ -2679,17 +2799,20 @@
 					});
 					scheduleChartResize(usCpiChart);
 					enableRmbCrosshair(usCpiChart, { labels, yDecimals: 2, ySuffix: '%' });
+					setModalUpdatedAt('usCpiModalUpdatedAt', j.updatedAt || new Date());
 					if (hint) hint.textContent = j.updatedAt ? `갱신: ${new Date(j.updatedAt).toLocaleString()}` : '';
 				} else {
 					if (hint) hint.textContent = 'Chart.js 로드 실패';
 				}
 			} catch (e) {
+				if (!isUsCpiModalDisplayActive()) return;
 				if (hint) hint.textContent = `조회 실패: ${e?.message || String(e)}`;
 			}
 		}
 
 		async function openUsRateModal() {
 			setUsRateModalVisible(true);
+			if (!isUsRateModalDisplayActive()) return;
 			const hint = document.getElementById('usRateHint');
 			if (hint) hint.textContent = '로딩 중...';
 			try {
@@ -2703,6 +2826,7 @@
 				});
 				const labels = series.labels;
 				const values = series.values;
+				if (!isUsRateModalDisplayActive()) return;
 				const ctx = document.getElementById('usRateChart')?.getContext?.('2d');
 				if (ctx && window.Chart) {
 					if (usRateChart) { try { usRateChart.destroy(); } catch {} usRateChart = null; }
@@ -2722,17 +2846,20 @@
 					});
 					scheduleChartResize(usRateChart);
 					enableRmbCrosshair(usRateChart, { labels, yDecimals: 3, ySuffix: '%' });
+					setModalUpdatedAt('usRateModalUpdatedAt', j.updatedAt || new Date());
 					if (hint) hint.textContent = j.updatedAt ? `갱신: ${new Date(j.updatedAt).toLocaleString()}` : '';
 				} else {
 					if (hint) hint.textContent = 'Chart.js 로드 실패';
 				}
 			} catch (e) {
+				if (!isUsRateModalDisplayActive()) return;
 				if (hint) hint.textContent = `조회 실패: ${e?.message || String(e)}`;
 			}
 		}
 
 		async function openVixModal() {
 			setVixModalVisible(true);
+			if (!isVixModalDisplayActive()) return;
 			const hint = document.getElementById('vixHint');
 			if (hint) hint.textContent = '로딩 중...';
 			try {
@@ -2746,6 +2873,7 @@
 				});
 				const labels = series.labels;
 				const values = series.values;
+				if (!isVixModalDisplayActive()) return;
 				const ctx = document.getElementById('vixChart')?.getContext?.('2d');
 				if (ctx && window.Chart) {
 					if (vixChart) { try { vixChart.destroy(); } catch {} vixChart = null; }
@@ -2768,6 +2896,7 @@
 					});
 					scheduleChartResize(vixChart);
 					enableRmbCrosshair(vixChart, { labels, yDecimals: 2, ySuffix: '' });
+					setModalUpdatedAt('vixModalUpdatedAt', j.updatedAt || new Date());
 
 					if (hint) {
 						const updated = j.updatedAt ? `갱신: ${new Date(j.updatedAt).toLocaleString()}` : '';
@@ -2777,6 +2906,7 @@
 					if (hint) hint.textContent = 'Chart.js 로드 실패';
 				}
 			} catch (e) {
+				if (!isVixModalDisplayActive()) return;
 				if (hint) hint.textContent = `조회 실패: ${e?.message || String(e)}`;
 			}
 		}
@@ -3127,6 +3257,7 @@
 		}
 
 		function renderTradingModal() {
+			if (!isTradingModalDisplayActive()) return;
 			const hintEl = document.getElementById('tradingModalHint');
 			const contentEl = document.getElementById('tradingModalContent');
 			if (!contentEl) return;
@@ -3211,6 +3342,7 @@
 		}
 
 		function renderTradingValueModal() {
+			if (!isTradingValueModalDisplayActive()) return;
 			const hintEl = document.getElementById('tradingValueModalHint');
 			const contentEl = document.getElementById('tradingValueModalContent');
 			if (!contentEl) return;
@@ -3340,6 +3472,7 @@
 		}
 
 		async function refreshTradingCandidates() {
+			if (!isTradingModalDisplayActive()) return;
 			const candidates = getTradingUniverseItems();
 			const scanId = ++tradingModalScanId;
 			tradingModalLoading = true;
@@ -3354,6 +3487,7 @@
 
 			if (candidates.length === 0) {
 				tradingModalLoading = false;
+				setModalUpdatedAt('tradingModalUpdatedAt', new Date());
 				renderTradingModal();
 				return;
 			}
@@ -3363,7 +3497,7 @@
 			const concurrency = Math.min(6, Math.max(2, navigator.hardwareConcurrency ? Math.floor(navigator.hardwareConcurrency / 2) : 4));
 
 			const worker = async () => {
-				while (scanId === tradingModalScanId && tradingModalOpen && cursor < candidates.length && found.length < 100) {
+				while (scanId === tradingModalScanId && isTradingModalDisplayActive() && cursor < candidates.length && found.length < 100) {
 					const item = candidates[cursor++];
 					let match = null;
 					try {
@@ -3375,7 +3509,7 @@
 						tradingModalScanStats.matched = found.length;
 						tradingModalMatches = found.slice().sort((a, b) => b.dropPct - a.dropPct).slice(0, 100);
 					}
-					if (tradingModalOpen && (match || (tradingModalScanStats.scanned % 8) === 0)) {
+					if (isTradingModalDisplayActive() && (match || (tradingModalScanStats.scanned % 8) === 0)) {
 						renderTradingModal();
 					}
 				}
@@ -3392,10 +3526,12 @@
 				exhausted: cursor >= candidates.length,
 			};
 			tradingModalLoading = false;
-			renderTradingModal();
+			setModalUpdatedAt('tradingModalUpdatedAt', new Date());
+			if (isTradingModalDisplayActive()) renderTradingModal();
 		}
 
 		async function refreshTradingValueCandidates() {
+			if (!isTradingValueModalDisplayActive()) return;
 			tradingValueModalLoading = true;
 			renderTradingValueModal();
 			try {
@@ -3404,7 +3540,8 @@
 				tradingValueUniverseItems = [];
 			}
 			tradingValueModalLoading = false;
-			renderTradingValueModal();
+			setModalUpdatedAt('tradingValueModalUpdatedAt', new Date());
+			if (isTradingValueModalDisplayActive()) renderTradingValueModal();
 		}
 
 		function setStockChartModalVisible(visible) {
@@ -3420,12 +3557,14 @@
 				if (sec) sec.style.display = 'none';
 				const statsEl = document.getElementById('stockChartModalKeyStats');
 				if (statsEl) statsEl.textContent = '-';
+				setModalUpdatedAt('stockChartModalUpdatedAt', null);
 			}
 		}
 
 		async function loadStockChartModalOpProfits(code) {
 			const normalized = String(code ?? '').trim().padStart(6, '0');
 			if (!/^[0-9]{6}$/.test(normalized)) return;
+			if (!isStockChartModalDisplayActive() || stockChartModalCode !== normalized) return;
 			const sec = document.getElementById('stockChartModalOpProfitSection');
 			const unitEl = document.getElementById('stockChartModalOpProfitUnit');
 			const statsEl = document.getElementById('stockChartModalKeyStats');
@@ -3443,6 +3582,7 @@
 				const r = await fetch(url, { cache: 'no-store' });
 				const j = await r.json().catch(() => ({}));
 				if (!r.ok || j?.error) throw new Error(j?.error || `HTTP ${r.status}`);
+				if (!isStockChartModalDisplayActive() || stockChartModalCode !== normalized) return;
 				const item = Array.isArray(j.items) ? j.items[0] : null;
 				if (!item) throw new Error('데이터 없음');
 
@@ -3455,6 +3595,7 @@
 				try {
 					const r2 = await fetch(`/api/price?code=${encodeURIComponent(normalized)}`, { cache: 'no-store' });
 					const j2 = await r2.json().catch(() => ({}));
+					if (!isStockChartModalDisplayActive() || stockChartModalCode !== normalized) return;
 					if (r2.ok && !j2?.error) {
 						const epsKis = Number(j2?.eps);
 						if (Number.isFinite(epsKis)) epsNum = epsKis;
@@ -3495,9 +3636,12 @@
 					'</tbody></table>',
 				].join('');
 
+				if (!isStockChartModalDisplayActive() || stockChartModalCode !== normalized) return;
 				contentEl.classList.remove('muted');
 				contentEl.innerHTML = html;
+				setModalUpdatedAt('stockChartModalUpdatedAt', new Date());
 			} catch (e) {
+				if (!isStockChartModalDisplayActive() || stockChartModalCode !== normalized) return;
 				if (statsEl) statsEl.textContent = '-';
 				contentEl.classList.add('muted');
 				contentEl.textContent = `영업이익 로드 실패: ${e?.message || String(e)}`;
@@ -3515,6 +3659,7 @@
 			const code = String(stockChartModalCode || '').padStart(6, '0');
 			const url = `https://ssl.pstatic.net/imgfinance/chart/item/candle/${kind}/${code}.png`;
 			img.src = withSidcode(url);
+			if (isStockChartModalDisplayActive()) setModalUpdatedAt('stockChartModalUpdatedAt', new Date());
 		}
 
 		function openStockChartModal(code, name) {
@@ -3527,6 +3672,7 @@
 			if (linkEl) linkEl.href = `https://finance.naver.com/item/main.naver?code=${normalized}`;
 			setStockChartModalVisible(true);
 			setStockChartModalKind('day');
+			setModalUpdatedAt('stockChartModalUpdatedAt', new Date());
 			loadStockChartModalOpProfits(normalized).catch(() => {});
 		}
 
@@ -3589,12 +3735,12 @@
 			if (cb.checked) selectedCodes.add(code);
 			else selectedCodes.delete(code);
 			if (!selectedCodes.has(code)) favoritesPendingDeleteCodes.delete(code);
-			if (favoritesModalOpen) {
+			if (isFavoritesModalDisplayActive()) {
 				const myEpoch = favoritesModalEpoch;
 				try { renderFavoritesModal(); } catch {}
 				ensureFavoritesSnapshotsLoaded(Array.from(selectedCodes))
 					.then(() => {
-						if (favoritesModalOpen && favoritesModalEpoch === myEpoch) {
+						if (isFavoritesModalDisplayActive() && favoritesModalEpoch === myEpoch) {
 							try { renderFavoritesModal(); } catch {}
 						}
 					})
@@ -3707,6 +3853,7 @@
 			const key = String(btn.dataset?.sector ?? '').trim();
 			if (!key || !SECTOR_DEFS[key]) return;
 			SECTOR_FILTER = (SECTOR_FILTER === key) ? null : key;
+			setModalUpdatedAt('sectorModalUpdatedAt', new Date());
 			const input = document.getElementById('stockSearchInput');
 			if (input) input.value = '';
 			setSectorModalVisible(false);
@@ -3721,6 +3868,7 @@
 			if (status) status.textContent = '엑셀 파일을 선택해 주세요 (코드 컬럼 필요)';
 			const input = document.getElementById('basketFileInput');
 			if (input) input.value = '';
+			setModalUpdatedAt('basketModalUpdatedAt', new Date());
 			renderTable();
 		});
 		document.getElementById('basketFileInput')?.addEventListener('change', (e) => {
@@ -3737,6 +3885,9 @@
 			if (sectorModalOpen) setSectorModalVisible(false);
 			if (tradingModalOpen) setTradingModalVisible(false);
 			if (tradingValueModalOpen) setTradingValueModalVisible(false);
+		});
+		document.addEventListener('visibilitychange', () => {
+			refreshVisiblePopupDataOnResume();
 		});
 		document.getElementById('stockChartModalTabs')?.addEventListener('click', (e) => {
 			const btn = e.target?.closest?.('.chartTab');
