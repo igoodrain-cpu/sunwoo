@@ -438,7 +438,7 @@
 	</div>
 
 	<div id="container">
-		<div class="panel">
+		<div id="stockTablePanel" class="panel">
 			<div class="tableWrap">
 				<table id="stockTable" class="stockTable">
 					<thead>
@@ -814,6 +814,8 @@
 		let basisSnapshot = null;
 		let busy = false;
 		let pendingRefresh = false;
+		let stockScreenInView = true;
+		let stockScreenVisible = true;
 		const selectedCodes = new Set();
 
 		const targetsByCode = new Map();
@@ -1405,6 +1407,60 @@
 			}
 		}
 
+		function isStockScreenDisplayActive() {
+			return document.visibilityState === 'visible' && stockScreenInView;
+		}
+
+		function syncStockScreenVisibility({ requestRefresh = false } = {}) {
+			const nextVisible = isStockScreenDisplayActive();
+			const changed = nextVisible !== stockScreenVisible;
+			stockScreenVisible = nextVisible;
+			if (stockScreenVisible && (changed || requestRefresh || pendingRefresh)) {
+				requestImmediateRefresh({ forceWhenVisible: true });
+			}
+		}
+
+		function observeStockScreenVisibility() {
+			const panel = document.getElementById('stockTablePanel');
+			if (!panel) return;
+			const updateStockScreenInViewFromRect = (rect) => {
+				const viewportHeight = window.innerHeight || document.documentElement.clientHeight || 0;
+				const visibleTop = Math.max(rect.top, 0);
+				const visibleBottom = Math.min(rect.bottom, viewportHeight);
+				const visibleHeight = Math.max(0, visibleBottom - visibleTop);
+				const panelHeight = Math.max(1, rect.height || (rect.bottom - rect.top) || 0);
+				const effectiveHeight = Math.max(1, Math.min(panelHeight, viewportHeight || panelHeight));
+				stockScreenInView = (visibleHeight / effectiveHeight) >= 0.5;
+			};
+			if (typeof IntersectionObserver === 'function') {
+				const io = new IntersectionObserver((entries) => {
+					const entry = entries && entries[0];
+					if (!entry || !entry.isIntersecting) {
+						stockScreenInView = false;
+					} else {
+						updateStockScreenInViewFromRect(entry.boundingClientRect);
+					}
+					syncStockScreenVisibility();
+				}, {
+					threshold: [0, 0.25, 0.5, 0.75, 1],
+				});
+				io.observe(panel);
+			} else {
+				const updateInView = () => {
+					const rect = panel.getBoundingClientRect();
+					updateStockScreenInViewFromRect(rect);
+					syncStockScreenVisibility();
+				};
+				window.addEventListener('scroll', updateInView, { passive: true });
+				window.addEventListener('resize', updateInView);
+				updateInView();
+			}
+			document.addEventListener('visibilitychange', () => {
+				syncStockScreenVisibility();
+			});
+			syncStockScreenVisibility({ requestRefresh: true });
+		}
+
 		function formatWon(value) {
 			const n = parseNumber(value);
 			if (!Number.isFinite(n)) return '-';
@@ -1738,6 +1794,7 @@
 		}
 
 		function renderTable() {
+			if (!stockScreenVisible) return;
 			const tbody = document.querySelector('#stockTable tbody');
 			if (!tbody) return;
 			const ordered = getOrderedDisplayItems();
@@ -2200,6 +2257,10 @@
 			}
 		}
 		async function update() {
+			if (!stockScreenVisible) {
+				pendingRefresh = true;
+				return;
+			}
 			if (busy) {
 				pendingRefresh = true;
 				const statusEl = document.getElementById('status');
@@ -2247,8 +2308,13 @@
 			}
 		}
 
-		function requestImmediateRefresh() {
+		function requestImmediateRefresh(options = {}) {
+			const { forceWhenVisible = false } = options;
 			if (refreshTimer) clearTimeout(refreshTimer);
+			if (!stockScreenVisible) {
+				pendingRefresh = true;
+				return;
+			}
 			refreshTimer = setTimeout(() => update(), 50);
 		}
 
@@ -3695,6 +3761,7 @@
 		syncRangeSelectValuesFromState();
 		loadFavoritesFromServer().catch(() => {});
 		updateSortHeaderLabels();
+		observeStockScreenVisibility();
 		updateMarketDeposit();
 		updateOilWti();
 		updateUsFuturesNq();
@@ -3704,7 +3771,6 @@
 		updateKospi200NightFutures();
 		refreshBasisSnapshot().catch(() => {});
 		updateFearGreed();
-		update();
 		window.addEventListener('resize', () => {
 			updateStickyHeaderTopOffset();
 		});
