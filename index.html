@@ -3346,6 +3346,12 @@
 			const hintEl = document.getElementById('tradingValueModalHint');
 			const contentEl = document.getElementById('tradingValueModalContent');
 			if (!contentEl) return;
+			const modalBodyEl = document.querySelector('#tradingValueModalPanel .modalBody');
+			const prevTableWrapEl = contentEl.querySelector('.favoritesTableWrap');
+			const scrollState = {
+				modalBodyTop: modalBodyEl?.scrollTop ?? 0,
+				tableWrapTop: prevTableWrapEl?.scrollTop ?? 0,
+			};
 			const rows = getTradingValueUniverseItems()
 				.filter((item) => Number.isFinite(parseNumber(item?.acml_tr_pbmn)))
 				.slice(0, 50)
@@ -3376,6 +3382,7 @@
 			if (rows.length === 0) {
 				contentEl.classList.add('muted');
 				contentEl.innerHTML = `<div class="muted">${tradingValueModalLoading ? '거래대금 상위 종목을 조회하고 있습니다...' : '표시할 종목이 없습니다.'}</div>`;
+				if (modalBodyEl) modalBodyEl.scrollTop = scrollState.modalBodyTop;
 				return;
 			}
 
@@ -3402,6 +3409,12 @@
 				rowsHtml,
 				'</tbody></table></div>',
 			].join('');
+			const nextTableWrapEl = contentEl.querySelector('.favoritesTableWrap');
+			if (nextTableWrapEl) {
+				nextTableWrapEl.scrollTop = scrollState.tableWrapTop;
+			} else if (modalBodyEl) {
+				modalBodyEl.scrollTop = scrollState.modalBodyTop;
+			}
 		}
 
 		function setTradingValueModalVisible(visible) {
@@ -3825,12 +3838,15 @@
 			if (e.target?.id === 'tradingModalOverlay') setTradingModalVisible(false);
 		});
 		document.getElementById('tradingModalContent')?.addEventListener('dblclick', (e) => {
+			if (e.button !== 0) return;
 			const tr = e.target?.closest?.('tr[data-code]');
 			if (!tr) return;
 			const code = String(tr.dataset?.code ?? '').trim().padStart(6, '0');
 			if (!/^[0-9]{6}$/.test(code)) return;
-			const name = tr.cells?.[0]?.textContent ?? '';
-			openStockChartModal(code, name);
+			const input = document.getElementById('stockSearchInput');
+			if (input) input.value = code;
+			try { renderTable(); } catch {}
+			setTradingModalVisible(false);
 		});
 		document.getElementById('tradingValueRefreshBtn')?.addEventListener('click', () => {
 			refreshTradingValueCandidates().catch(() => {});
@@ -3840,12 +3856,15 @@
 			if (e.target?.id === 'tradingValueModalOverlay') setTradingValueModalVisible(false);
 		});
 		document.getElementById('tradingValueModalContent')?.addEventListener('dblclick', (e) => {
+			if (e.button !== 0) return;
 			const tr = e.target?.closest?.('tr[data-code]');
 			if (!tr) return;
 			const code = String(tr.dataset?.code ?? '').trim().padStart(6, '0');
 			if (!/^[0-9]{6}$/.test(code)) return;
-			const name = tr.cells?.[0]?.textContent ?? '';
-			openStockChartModal(code, name);
+			const input = document.getElementById('stockSearchInput');
+			if (input) input.value = code;
+			try { renderTable(); } catch {}
+			setTradingValueModalVisible(false);
 		});
 		document.getElementById('sectorGrid')?.addEventListener('click', (e) => {
 			const btn = e.target?.closest?.('button.sectorCard');
