@@ -5127,12 +5127,15 @@ app.get('/api/trading-value-stocks', async (req, res) => {
   const ttlMs = Math.max(10_000, Math.min(5 * 60_000, Number(req.query.ttlMs ?? TRADING_VALUE_STOCKS_TTL_MS_DEFAULT)));
   const marketRaw = String(req.query.market ?? 'all').toLowerCase();
   const market = ['kospi', 'kosdaq', 'all'].includes(marketRaw) ? marketRaw : 'all';
+  const includeSector = String(req.query.includeSector ?? '0') === '1';
+  const sectorTtlMs = Math.max(60_000, Math.min(180 * 24 * 60 * 60 * 1000, Number(req.query.sectorTtlMs ?? NAVER_SECTOR_TTL_MS_DEFAULT)));
+  const sectorConcurrency = Math.max(1, Math.min(6, Number(req.query.sectorConcurrency ?? 3)));
   const fidQueryParams = Object.fromEntries(
     Object.entries(req.query)
       .filter(([key]) => key.toLowerCase().startsWith('fid_'))
       .map(([key, value]) => [key.toUpperCase(), String(value)])
   );
-  const cacheKey = stableStringify({ market, limit, rawRows, maxPages, fidQueryParams });
+  const cacheKey = stableStringify({ market, limit, rawRows, maxPages, includeSector, fidQueryParams });
   const now = Date.now();
   const existing = tradingValueStocksCacheByKey.get(cacheKey);
   if (existing?.value && now < existing.expiresAtMs) return res.json(existing.value);
@@ -5246,10 +5249,37 @@ app.get('/api/trading-value-stocks', async (req, res) => {
       })
       .slice(0, limit);
 
+    if (includeSector && items.length > 0) {
+      const codes = items
+        .map((item) => String(item?.code ?? '').trim().padStart(6, '0'))
+        .filter((code) => /^[0-9]{6}$/.test(code));
+
+      const resolved = await mapWithConcurrency(codes, sectorConcurrency, async (code) => {
+        try {
+          return await getNaverSectorCached(code, sectorTtlMs);
+        } catch {
+          return { code, sector: null };
+        }
+      });
+
+      const sectorByCode = new Map();
+      for (const item of resolved || []) {
+        const code = String(item?.code ?? '').trim().padStart(6, '0');
+        if (!/^[0-9]{6}$/.test(code)) continue;
+        sectorByCode.set(code, item?.sector ?? null);
+      }
+
+      for (const item of items) {
+        const code = String(item?.code ?? '').trim().padStart(6, '0');
+        item.sector = sectorByCode.has(code) ? sectorByCode.get(code) : null;
+      }
+    }
+
     return {
       market,
       count: items.length,
       items,
+      sectorIncluded: includeSector,
       updatedAt: new Date().toISOString(),
       source: 'kis-volume-rank',
     };

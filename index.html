@@ -334,6 +334,12 @@
 			top: 0;
 			z-index: 1;
 		}
+		#tradingValueModalContent .sectorCell {
+			font-size: 12px;
+			color: var(--muted);
+			white-space: normal;
+			line-height: 1.35;
+		}
 
 		/* Sector modal */
 		.sectorGrid {
@@ -1047,6 +1053,8 @@
 		let tradingValueModalOpen = false;
 		let tradingValueModalLoading = false;
 		let tradingValueUniverseItems = [];
+		let tradingValueSortKey = 'tradingValueNum';
+		let tradingValueSortDir = 'desc';
 
 		let SECTOR_FILTER = null; // one of sectorCard[data-sector] or null
 		const SECTOR_DEFS = {
@@ -1181,26 +1189,98 @@
 			return parts.map(x => String(x ?? '').trim()).filter(Boolean).join(' ').toLowerCase();
 		}
 
+		function itemMatchesSectorDef(it, def) {
+			const h = buildSectorHaystack(it);
+			if (!h || !def || !Array.isArray(def.keywords) || def.keywords.length === 0) return false;
+			const excludes = Array.isArray(def.excludeKeywords) ? def.excludeKeywords : [];
+			if (excludes.length > 0) {
+				const hitExclude = excludes.some((kw) => {
+					const k = String(kw ?? '').trim().toLowerCase();
+					return k ? h.includes(k) : false;
+				});
+				if (hitExclude) return false;
+			}
+			return def.keywords.some((kw) => {
+				const k = String(kw ?? '').trim().toLowerCase();
+				return k ? h.includes(k) : false;
+			});
+		}
+
+		function getItemSectorLabels(it) {
+			const labels = [];
+			for (const [key, def] of Object.entries(SECTOR_DEFS)) {
+				if (key === 'all') continue;
+				if (itemMatchesSectorDef(it, def)) labels.push(String(def?.label ?? key));
+			}
+			return labels;
+		}
+
+		function setTradingValueSort(nextKey) {
+			if (!nextKey) return;
+			if (tradingValueSortKey === nextKey) tradingValueSortDir = tradingValueSortDir === 'asc' ? 'desc' : 'asc';
+			else {
+				tradingValueSortKey = nextKey;
+				tradingValueSortDir = nextKey === 'tradingValueNum' ? 'desc' : 'asc';
+			}
+			renderTradingValueModal();
+		}
+
+		function getTradingValueSortValue(row, key) {
+			switch (key) {
+				case 'name': return String(row?.name ?? '');
+				case 'code': return String(row?.code ?? '');
+				case 'sectorText': return String(row?.sectorText ?? '');
+				case 'tradingValueNum': return row?.tradingValueNum;
+				case 'priceNum': return row?.priceNum;
+				case 'changePctNum': return row?.changePctNum;
+				default: return null;
+			}
+		}
+
+		function sortTradingValueRows(rows) {
+			const key = tradingValueSortKey;
+			const dirMul = tradingValueSortDir === 'asc' ? 1 : -1;
+			const isString = key === 'name' || key === 'code' || key === 'sectorText';
+			return rows
+				.map((row, idx) => ({ row, idx, value: getTradingValueSortValue(row, key) }))
+				.sort((a, b) => {
+					if (isString) {
+						const av = String(a.value ?? '');
+						const bv = String(b.value ?? '');
+						const aMissing = !av || av === '-';
+						const bMissing = !bv || bv === '-';
+						if (aMissing && bMissing) return a.idx - b.idx;
+						if (aMissing) return 1;
+						if (bMissing) return -1;
+						const cmp = av.localeCompare(bv, 'ko', { numeric: true, sensitivity: 'base' });
+						return cmp === 0 ? (a.idx - b.idx) : (cmp * dirMul);
+					}
+					const av = Number(a.value);
+					const bv = Number(b.value);
+					const aFinite = Number.isFinite(av);
+					const bFinite = Number.isFinite(bv);
+					if (!aFinite && !bFinite) return a.idx - b.idx;
+					if (!aFinite) return 1;
+					if (!bFinite) return -1;
+					if (av === bv) return a.idx - b.idx;
+					return (av - bv) * dirMul;
+				})
+				.map((entry) => entry.row);
+		}
+
+		function getTradingValueSortHeaderLabel(label, key) {
+			return tradingValueSortKey === key
+				? `${label} ${tradingValueSortDir === 'asc' ? '▲' : '▼'}`
+				: label;
+		}
+
 		function applySectorFilter(items) {
 			const key = String(SECTOR_FILTER ?? '').trim();
 			if (!key) return items;
 			const def = SECTOR_DEFS[key];
 			if (!def || !Array.isArray(def.keywords) || def.keywords.length === 0) return items;
 			return (items || []).filter((it) => {
-				const h = buildSectorHaystack(it);
-				if (!h) return false;
-				const excludes = Array.isArray(def.excludeKeywords) ? def.excludeKeywords : [];
-				if (excludes.length > 0) {
-					const hitExclude = excludes.some((kw) => {
-						const k = String(kw ?? '').trim().toLowerCase();
-						return k ? h.includes(k) : false;
-					});
-					if (hitExclude) return false;
-				}
-				return def.keywords.some((kw) => {
-					const k = String(kw ?? '').trim().toLowerCase();
-					return k ? h.includes(k) : false;
-				});
+				return itemMatchesSectorDef(it, def);
 			});
 		}
 
@@ -3224,7 +3304,7 @@
 		}
 
 		async function fetchTradingValueUniverse() {
-			const url = `/api/trading-value-stocks?limit=${encodeURIComponent(50)}&market=${encodeURIComponent(MARKET_FILTER)}`;
+			const url = `/api/trading-value-stocks?limit=${encodeURIComponent(50)}&market=${encodeURIComponent(MARKET_FILTER)}&includeSector=1`;
 			const r = await fetch(url, { cache: 'no-store' });
 			const j = await r.json().catch(() => ({}));
 			if (!r.ok || j?.error) throw new Error(j?.error || `HTTP ${r.status}`);
@@ -3364,11 +3444,13 @@
 					return {
 						code,
 						name: String(live?.name || live?.hts_kor_isnm || code),
+						sectorText: String(live?.sector ?? '').trim() || getItemSectorLabels(live).join(', ') || '-',
 						priceNum,
 						tradingValueNum,
 						changePctNum,
 					};
-				});
+					});
+				const sortedRows = sortTradingValueRows(rows);
 
 			if (hintEl) {
 				const base = tradingValueModalLoading
@@ -3386,12 +3468,13 @@
 				return;
 			}
 
-			const rowsHtml = rows.map((row) => {
+			const rowsHtml = sortedRows.map((row) => {
 				const changeCls = Number.isFinite(row.changePctNum) ? (row.changePctNum > 0 ? 'up' : (row.changePctNum < 0 ? 'down' : '')) : '';
 				return `
 					<tr data-code="${escapeHtml(row.code)}">
 						<td>${escapeHtml(row.name)}</td>
 						<td class="code">${escapeHtml(row.code)}</td>
+						<td class="sectorCell">${escapeHtml(row.sectorText)}</td>
 						<td class="right">${escapeHtml(formatEok(row.tradingValueNum))}</td>
 						<td class="right">${escapeHtml(formatWon(row.priceNum))}</td>
 						<td class="right ${changeCls}">${escapeHtml(Number.isFinite(row.changePctNum) ? formatPct(row.changePctNum, 2) : '-')}</td>
@@ -3403,8 +3486,8 @@
 			contentEl.innerHTML = [
 				'<div class="favoritesTableWrap">',
 				'<table class="stockTable favoritesStockTable">',
-				'<colgroup><col /><col style="width:110px" /><col style="width:140px" /><col style="width:120px" /><col style="width:100px" /></colgroup>',
-				'<thead><tr><th scope="col">종목</th><th scope="col">코드</th><th scope="col" class="right">거래대금</th><th scope="col" class="right">현재가</th><th scope="col" class="right">등락률</th></tr></thead>',
+				'<colgroup><col /><col style="width:110px" /><col style="width:180px" /><col style="width:140px" /><col style="width:120px" /><col style="width:100px" /></colgroup>',
+				`<thead><tr><th scope="col" class="sortable" data-sort-key="name">${escapeHtml(getTradingValueSortHeaderLabel('종목', 'name'))}</th><th scope="col" class="sortable" data-sort-key="code">${escapeHtml(getTradingValueSortHeaderLabel('코드', 'code'))}</th><th scope="col" class="sortable" data-sort-key="sectorText">${escapeHtml(getTradingValueSortHeaderLabel('섹터', 'sectorText'))}</th><th scope="col" class="sortable right" data-sort-key="tradingValueNum">${escapeHtml(getTradingValueSortHeaderLabel('거래대금', 'tradingValueNum'))}</th><th scope="col" class="sortable right" data-sort-key="priceNum">${escapeHtml(getTradingValueSortHeaderLabel('현재가', 'priceNum'))}</th><th scope="col" class="sortable right" data-sort-key="changePctNum">${escapeHtml(getTradingValueSortHeaderLabel('등락률', 'changePctNum'))}</th></tr></thead>`,
 				'<tbody>',
 				rowsHtml,
 				'</tbody></table></div>',
@@ -3865,6 +3948,12 @@
 			if (input) input.value = code;
 			try { renderTable(); } catch {}
 			setTradingValueModalVisible(false);
+		});
+		document.getElementById('tradingValueModalContent')?.addEventListener('click', (e) => {
+			if (e.button !== 0) return;
+			const th = e.target?.closest?.('th[data-sort-key]');
+			if (!th) return;
+			setTradingValueSort(String(th.dataset?.sortKey ?? '').trim());
 		});
 		document.getElementById('sectorGrid')?.addEventListener('click', (e) => {
 			const btn = e.target?.closest?.('button.sectorCard');
