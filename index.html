@@ -412,6 +412,7 @@
 					<button class="pill" id="sectorBtn" data-busy-disable="1">섹터종목</button>
 					<button class="pill" id="tradingBtn" data-busy-disable="1">트레이딩종목</button>
 					<button class="pill" id="tradingValueBtn" data-busy-disable="1">거래대금</button>
+					<button class="pill" id="ma20WeeklyLowerShadowBtn" data-busy-disable="1">20일선 상위</button>
 				</div>
 				<div class="segment">
 					<span class="highlightYellow">예치금</span>
@@ -747,6 +748,29 @@
 		</div>
 	</div>
 
+	<!-- MA20 Weekly Lower Shadow Modal -->
+	<div id="ma20WeeklyLowerShadowModalOverlay" class="modalOverlay" aria-hidden="true">
+		<div id="ma20WeeklyLowerShadowModalPanel" class="modalPanel" role="dialog" aria-modal="true">
+			<div class="modalHeader">
+				<div class="modalHeaderMain">
+					<div class="modalTitle">20일선 상위</div>
+					<div class="muted modalUpdatedAt" id="ma20WeeklyLowerShadowModalUpdatedAt">최근 갱신: -</div>
+				</div>
+				<div class="actions">
+					<button class="pill" id="ma20WeeklyLowerShadowRefreshBtn" type="button" data-busy-disable="1">새로고침</button>
+					<button class="pill" id="ma20WeeklyLowerShadowModalCloseBtn" type="button">닫기</button>
+				</div>
+			</div>
+			<div class="modalBody">
+				<div class="tradingMeta">
+					<div class="muted" id="ma20WeeklyLowerShadowModalHint">20일선 위에 있고 최신 주봉에 아래꼬리가 있는 종목을 표시합니다.</div>
+					<div class="muted"><strong>100개</strong>까지 표시</div>
+				</div>
+				<div id="ma20WeeklyLowerShadowModalContent" class="muted">-</div>
+			</div>
+		</div>
+	</div>
+
 	<script>
 		'use strict';
 
@@ -980,6 +1004,9 @@
 		function isTradingValueModalDisplayActive() {
 			return isModalDisplayActive('tradingValueModalOverlay', tradingValueModalOpen);
 		}
+		function isMa20WeeklyLowerShadowModalDisplayActive() {
+			return isModalDisplayActive('ma20WeeklyLowerShadowModalOverlay', ma20WeeklyLowerShadowModalOpen);
+		}
 		function isUsCpiModalDisplayActive() {
 			return isModalDisplayActive('usCpiModalOverlay', usCpiModalOpen);
 		}
@@ -1028,6 +1055,7 @@
 			if (isFavoritesModalDisplayActive()) refreshFavoritesModalVisibleData({ force: true }).catch(() => {});
 			if (isTradingModalDisplayActive()) refreshTradingCandidates().catch(() => {});
 			if (isTradingValueModalDisplayActive()) refreshTradingValueCandidates().catch(() => {});
+			if (isMa20WeeklyLowerShadowModalDisplayActive()) refreshMa20WeeklyLowerShadowCandidates().catch(() => {});
 			if (isUsCpiModalDisplayActive()) openUsCpiModal().catch(() => {});
 			if (isUsRateModalDisplayActive()) openUsRateModal().catch(() => {});
 			if (isVixModalDisplayActive()) openVixModal().catch(() => {});
@@ -1055,6 +1083,11 @@
 		let tradingValueUniverseItems = [];
 		let tradingValueSortKey = 'tradingValueNum';
 		let tradingValueSortDir = 'desc';
+		let ma20WeeklyLowerShadowModalOpen = false;
+		let ma20WeeklyLowerShadowModalLoading = false;
+		let ma20WeeklyLowerShadowItems = [];
+		let ma20WeeklyLowerShadowSortKey = 'aboveMa20Pct';
+		let ma20WeeklyLowerShadowSortDir = 'desc';
 
 		let SECTOR_FILTER = null; // one of sectorCard[data-sector] or null
 		const SECTOR_DEFS = {
@@ -1271,6 +1304,66 @@
 		function getTradingValueSortHeaderLabel(label, key) {
 			return tradingValueSortKey === key
 				? `${label} ${tradingValueSortDir === 'asc' ? '▲' : '▼'}`
+				: label;
+		}
+
+		function setMa20WeeklyLowerShadowSort(nextKey) {
+			if (!nextKey) return;
+			if (ma20WeeklyLowerShadowSortKey === nextKey) ma20WeeklyLowerShadowSortDir = ma20WeeklyLowerShadowSortDir === 'asc' ? 'desc' : 'asc';
+			else {
+				ma20WeeklyLowerShadowSortKey = nextKey;
+				ma20WeeklyLowerShadowSortDir = (nextKey === 'aboveMa20Pct' || nextKey === 'tradingValueNum' || nextKey === 'changePctNum') ? 'desc' : 'asc';
+			}
+			renderMa20WeeklyLowerShadowModal();
+		}
+
+		function getMa20WeeklyLowerShadowSortValue(row, key) {
+			switch (key) {
+				case 'name': return String(row?.name ?? '');
+				case 'code': return String(row?.code ?? '');
+				case 'sectorText': return String(row?.sectorText ?? '');
+				case 'aboveMa20Pct': return row?.aboveMa20Pct;
+				case 'tradingValueNum': return row?.tradingValueNum;
+				case 'priceNum': return row?.priceNum;
+				case 'changePctNum': return row?.changePctNum;
+				default: return null;
+			}
+		}
+
+		function sortMa20WeeklyLowerShadowRows(rows) {
+			const key = ma20WeeklyLowerShadowSortKey;
+			const dirMul = ma20WeeklyLowerShadowSortDir === 'asc' ? 1 : -1;
+			const isString = key === 'name' || key === 'code' || key === 'sectorText';
+			return rows
+				.map((row, idx) => ({ row, idx, value: getMa20WeeklyLowerShadowSortValue(row, key) }))
+				.sort((a, b) => {
+					if (isString) {
+						const av = String(a.value ?? '');
+						const bv = String(b.value ?? '');
+						const aMissing = !av || av === '-';
+						const bMissing = !bv || bv === '-';
+						if (aMissing && bMissing) return a.idx - b.idx;
+						if (aMissing) return 1;
+						if (bMissing) return -1;
+						const cmp = av.localeCompare(bv, 'ko', { numeric: true, sensitivity: 'base' });
+						return cmp === 0 ? (a.idx - b.idx) : (cmp * dirMul);
+					}
+					const av = Number(a.value);
+					const bv = Number(b.value);
+					const aFinite = Number.isFinite(av);
+					const bFinite = Number.isFinite(bv);
+					if (!aFinite && !bFinite) return a.idx - b.idx;
+					if (!aFinite) return 1;
+					if (!bFinite) return -1;
+					if (av === bv) return a.idx - b.idx;
+					return (av - bv) * dirMul;
+				})
+				.map((entry) => entry.row);
+		}
+
+		function getMa20WeeklyLowerShadowSortHeaderLabel(label, key) {
+			return ma20WeeklyLowerShadowSortKey === key
+				? `${label} ${ma20WeeklyLowerShadowSortDir === 'asc' ? '▲' : '▼'}`
 				: label;
 		}
 
@@ -2083,6 +2176,9 @@
 			}
 			if (isTradingValueModalDisplayActive()) {
 				try { renderTradingValueModal(); } catch {}
+			}
+			if (isMa20WeeklyLowerShadowModalDisplayActive()) {
+				try { renderMa20WeeklyLowerShadowModal(); } catch {}
 			}
 		}
 
@@ -3303,8 +3399,20 @@
 			return `시장: ${getMarketFilterLabelKor()}`;
 		}
 
+		function getMa20WeeklyLowerShadowContextText() {
+			return `시장: ${getMarketFilterLabelKor()}`;
+		}
+
 		async function fetchTradingValueUniverse() {
 			const url = `/api/trading-value-stocks?limit=${encodeURIComponent(50)}&market=${encodeURIComponent(MARKET_FILTER)}&includeSector=1`;
+			const r = await fetch(url, { cache: 'no-store' });
+			const j = await r.json().catch(() => ({}));
+			if (!r.ok || j?.error) throw new Error(j?.error || `HTTP ${r.status}`);
+			return Array.isArray(j.items) ? j.items : [];
+		}
+
+		async function fetchMa20WeeklyLowerShadowUniverse() {
+			const url = `/api/ma20-weekly-lower-shadow-stocks?limit=${encodeURIComponent(100)}&market=${encodeURIComponent(MARKET_FILTER)}&includeSector=1`;
 			const r = await fetch(url, { cache: 'no-store' });
 			const j = await r.json().catch(() => ({}));
 			if (!r.ok || j?.error) throw new Error(j?.error || `HTTP ${r.status}`);
@@ -3514,6 +3622,99 @@
 			refreshTradingValueCandidates().catch(() => {});
 		}
 
+		function renderMa20WeeklyLowerShadowModal() {
+			if (!isMa20WeeklyLowerShadowModalDisplayActive()) return;
+			const hintEl = document.getElementById('ma20WeeklyLowerShadowModalHint');
+			const contentEl = document.getElementById('ma20WeeklyLowerShadowModalContent');
+			if (!contentEl) return;
+			const modalBodyEl = document.querySelector('#ma20WeeklyLowerShadowModalPanel .modalBody');
+			const prevTableWrapEl = contentEl.querySelector('.favoritesTableWrap');
+			const scrollState = {
+				modalBodyTop: modalBodyEl?.scrollTop ?? 0,
+				tableWrapTop: prevTableWrapEl?.scrollTop ?? 0,
+			};
+
+			const rows = (Array.isArray(ma20WeeklyLowerShadowItems) ? ma20WeeklyLowerShadowItems : []).map((item) => {
+				const code = String(item?.code ?? '').trim().padStart(6, '0');
+				const priceNum = parseNumber(item?.stck_prpr ?? item?.close);
+				const tradingValueNum = parseNumber(item?.acml_tr_pbmn);
+				const changePctNum = parseNumber(item?.prdy_ctrt);
+				const aboveMa20Pct = parseNumber(item?.aboveMa20Pct);
+				return {
+					code,
+					name: String(item?.name || item?.hts_kor_isnm || code),
+					sectorText: String(item?.sector ?? '').trim() || getItemSectorLabels(item).join(', ') || '-',
+					priceNum,
+					tradingValueNum,
+					changePctNum,
+					aboveMa20Pct,
+				};
+			});
+			const sortedRows = sortMa20WeeklyLowerShadowRows(rows);
+
+			if (hintEl) {
+				const base = ma20WeeklyLowerShadowModalLoading
+					? '20일선 상위 및 주봉 아래꼬리 종목을 불러오는 중입니다...'
+					: rows.length
+						? '20일선 위에 있고 주봉 아래꼬리가 있는 종목을 표시합니다.'
+						: '표시할 종목이 없습니다.';
+				hintEl.textContent = `${base} (${getMa20WeeklyLowerShadowContextText()})`;
+			}
+
+			if (rows.length === 0) {
+				contentEl.classList.add('muted');
+				contentEl.innerHTML = `<div class="muted">${ma20WeeklyLowerShadowModalLoading ? '조건 충족 종목을 조회하고 있습니다...' : '표시할 종목이 없습니다.'}</div>`;
+				if (modalBodyEl) modalBodyEl.scrollTop = scrollState.modalBodyTop;
+				return;
+			}
+
+			const rowsHtml = sortedRows.map((row) => {
+				const changeCls = Number.isFinite(row.changePctNum) ? (row.changePctNum > 0 ? 'up' : (row.changePctNum < 0 ? 'down' : '')) : '';
+				return `
+					<tr data-code="${escapeHtml(row.code)}">
+						<td>${escapeHtml(row.name)}</td>
+						<td class="code">${escapeHtml(row.code)}</td>
+						<td class="sectorCell">${escapeHtml(row.sectorText)}</td>
+						<td class="right">${escapeHtml(Number.isFinite(row.aboveMa20Pct) ? formatPct(row.aboveMa20Pct, 2) : '-')}</td>
+						<td class="right">${escapeHtml(formatEok(row.tradingValueNum))}</td>
+						<td class="right">${escapeHtml(formatWon(row.priceNum))}</td>
+						<td class="right ${changeCls}">${escapeHtml(Number.isFinite(row.changePctNum) ? formatPct(row.changePctNum, 2) : '-')}</td>
+					</tr>
+				`;
+			}).join('');
+
+			contentEl.classList.remove('muted');
+			contentEl.innerHTML = [
+				'<div class="favoritesTableWrap">',
+				'<table class="stockTable favoritesStockTable">',
+				'<colgroup><col /><col style="width:110px" /><col style="width:180px" /><col style="width:130px" /><col style="width:140px" /><col style="width:120px" /><col style="width:100px" /></colgroup>',
+				`<thead><tr><th scope="col" class="sortable" data-sort-key="name">${escapeHtml(getMa20WeeklyLowerShadowSortHeaderLabel('종목', 'name'))}</th><th scope="col" class="sortable" data-sort-key="code">${escapeHtml(getMa20WeeklyLowerShadowSortHeaderLabel('코드', 'code'))}</th><th scope="col" class="sortable" data-sort-key="sectorText">${escapeHtml(getMa20WeeklyLowerShadowSortHeaderLabel('섹터', 'sectorText'))}</th><th scope="col" class="sortable right" data-sort-key="aboveMa20Pct">${escapeHtml(getMa20WeeklyLowerShadowSortHeaderLabel('20일선 상위', 'aboveMa20Pct'))}</th><th scope="col" class="sortable right" data-sort-key="tradingValueNum">${escapeHtml(getMa20WeeklyLowerShadowSortHeaderLabel('거래대금', 'tradingValueNum'))}</th><th scope="col" class="sortable right" data-sort-key="priceNum">${escapeHtml(getMa20WeeklyLowerShadowSortHeaderLabel('현재가', 'priceNum'))}</th><th scope="col" class="sortable right" data-sort-key="changePctNum">${escapeHtml(getMa20WeeklyLowerShadowSortHeaderLabel('등락률', 'changePctNum'))}</th></tr></thead>`,
+				'<tbody>',
+				rowsHtml,
+				'</tbody></table></div>',
+			].join('');
+			const nextTableWrapEl = contentEl.querySelector('.favoritesTableWrap');
+			if (nextTableWrapEl) {
+				nextTableWrapEl.scrollTop = scrollState.tableWrapTop;
+			} else if (modalBodyEl) {
+				modalBodyEl.scrollTop = scrollState.modalBodyTop;
+			}
+		}
+
+		function setMa20WeeklyLowerShadowModalVisible(visible) {
+			ma20WeeklyLowerShadowModalOpen = !!visible;
+			const overlay = document.getElementById('ma20WeeklyLowerShadowModalOverlay');
+			if (!overlay) return;
+			overlay.classList.toggle('open', ma20WeeklyLowerShadowModalOpen);
+			overlay.setAttribute('aria-hidden', ma20WeeklyLowerShadowModalOpen ? 'false' : 'true');
+			if (!ma20WeeklyLowerShadowModalOpen) {
+				ma20WeeklyLowerShadowModalLoading = false;
+				return;
+			}
+			renderMa20WeeklyLowerShadowModal();
+			refreshMa20WeeklyLowerShadowCandidates().catch(() => {});
+		}
+
 		async function getTradingHistorySnapshot(code) {
 			const normalized = String(code ?? '').trim().padStart(6, '0');
 			if (!/^[0-9]{6}$/.test(normalized)) throw new Error('유효하지 않은 code');
@@ -3638,6 +3839,20 @@
 			tradingValueModalLoading = false;
 			setModalUpdatedAt('tradingValueModalUpdatedAt', new Date());
 			if (isTradingValueModalDisplayActive()) renderTradingValueModal();
+		}
+
+		async function refreshMa20WeeklyLowerShadowCandidates() {
+			if (!isMa20WeeklyLowerShadowModalDisplayActive()) return;
+			ma20WeeklyLowerShadowModalLoading = true;
+			renderMa20WeeklyLowerShadowModal();
+			try {
+				ma20WeeklyLowerShadowItems = await fetchMa20WeeklyLowerShadowUniverse();
+			} catch {
+				ma20WeeklyLowerShadowItems = [];
+			}
+			ma20WeeklyLowerShadowModalLoading = false;
+			setModalUpdatedAt('ma20WeeklyLowerShadowModalUpdatedAt', new Date());
+			if (isMa20WeeklyLowerShadowModalDisplayActive()) renderMa20WeeklyLowerShadowModal();
 		}
 
 		function setStockChartModalVisible(visible) {
@@ -3795,6 +4010,7 @@
 		document.getElementById('sectorBtn')?.addEventListener('click', () => setSectorModalVisible(true));
 		document.getElementById('tradingBtn')?.addEventListener('click', () => setTradingModalVisible(true));
 		document.getElementById('tradingValueBtn')?.addEventListener('click', () => setTradingValueModalVisible(true));
+		document.getElementById('ma20WeeklyLowerShadowBtn')?.addEventListener('click', () => setMa20WeeklyLowerShadowModalVisible(true));
 		document.getElementById('stockSearchInput')?.addEventListener('keydown', (e) => {
 			if (e.key === 'Enter') { e.preventDefault(); renderTable(); }
 		});
@@ -3955,6 +4171,30 @@
 			if (!th) return;
 			setTradingValueSort(String(th.dataset?.sortKey ?? '').trim());
 		});
+		document.getElementById('ma20WeeklyLowerShadowRefreshBtn')?.addEventListener('click', () => {
+			refreshMa20WeeklyLowerShadowCandidates().catch(() => {});
+		});
+		document.getElementById('ma20WeeklyLowerShadowModalCloseBtn')?.addEventListener('click', () => setMa20WeeklyLowerShadowModalVisible(false));
+		document.getElementById('ma20WeeklyLowerShadowModalOverlay')?.addEventListener('click', (e) => {
+			if (e.target?.id === 'ma20WeeklyLowerShadowModalOverlay') setMa20WeeklyLowerShadowModalVisible(false);
+		});
+		document.getElementById('ma20WeeklyLowerShadowModalContent')?.addEventListener('dblclick', (e) => {
+			if (e.button !== 0) return;
+			const tr = e.target?.closest?.('tr[data-code]');
+			if (!tr) return;
+			const code = String(tr.dataset?.code ?? '').trim().padStart(6, '0');
+			if (!/^[0-9]{6}$/.test(code)) return;
+			const input = document.getElementById('stockSearchInput');
+			if (input) input.value = code;
+			try { renderTable(); } catch {}
+			setMa20WeeklyLowerShadowModalVisible(false);
+		});
+		document.getElementById('ma20WeeklyLowerShadowModalContent')?.addEventListener('click', (e) => {
+			if (e.button !== 0) return;
+			const th = e.target?.closest?.('th[data-sort-key]');
+			if (!th) return;
+			setMa20WeeklyLowerShadowSort(String(th.dataset?.sortKey ?? '').trim());
+		});
 		document.getElementById('sectorGrid')?.addEventListener('click', (e) => {
 			const btn = e.target?.closest?.('button.sectorCard');
 			if (!btn) return;
@@ -3993,6 +4233,7 @@
 			if (sectorModalOpen) setSectorModalVisible(false);
 			if (tradingModalOpen) setTradingModalVisible(false);
 			if (tradingValueModalOpen) setTradingValueModalVisible(false);
+			if (ma20WeeklyLowerShadowModalOpen) setMa20WeeklyLowerShadowModalVisible(false);
 		});
 		document.addEventListener('visibilitychange', () => {
 			refreshVisiblePopupDataOnResume();

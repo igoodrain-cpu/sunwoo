@@ -547,6 +547,8 @@ const RANGE_STOCKS_TTL_MS_DEFAULT = 5 * 60 * 1000; // 5m (네이버 페이지 �
 const rangeStocksCacheByKey = new Map();
 const TRADING_VALUE_STOCKS_TTL_MS_DEFAULT = 60 * 1000; // 60s
 const tradingValueStocksCacheByKey = new Map();
+const MA20_WEEKLY_LOWER_SHADOW_STOCKS_TTL_MS_DEFAULT = 10 * 60 * 1000; // 10m
+const ma20WeeklyLowerShadowStocksCacheByKey = new Map();
 
 const RESOLVE_STOCK_UNIVERSE_TTL_MS_DEFAULT = 12 * 60 * 60 * 1000; // 12h (전체 종목 리스트)
 const resolveStockUniverseCache = {
@@ -1907,6 +1909,48 @@ function computeSmaFromCloses(closes, windowSize) {
     sum += v;
   }
   return sum / w;
+}
+
+function hasMeaningfulLowerShadow(bar, minBodyRatio = 0.5) {
+  const open = Number(bar?.open);
+  const high = Number(bar?.high);
+  const low = Number(bar?.low);
+  const close = Number(bar?.close);
+  if (![open, high, low, close].every(Number.isFinite)) return false;
+  const candleLow = Math.min(open, close);
+  const body = Math.abs(close - open);
+  const lowerShadow = candleLow - low;
+  const range = high - low;
+  if (!Number.isFinite(lowerShadow) || lowerShadow <= 0) return false;
+  if (!Number.isFinite(range) || range <= 0) return false;
+  if (body <= 0) return lowerShadow / range >= 0.25;
+  return lowerShadow >= (body * minBodyRatio);
+}
+
+function evaluateMa20WeeklyLowerShadowCandidate({ dailyItems, weeklyItems }) {
+  const dayList = Array.isArray(dailyItems) ? dailyItems.slice() : [];
+  const weekList = Array.isArray(weeklyItems) ? weeklyItems.slice() : [];
+  dayList.sort((a, b) => String(a?.date ?? '').localeCompare(String(b?.date ?? '')));
+  weekList.sort((a, b) => String(a?.date ?? '').localeCompare(String(b?.date ?? '')));
+
+  const closes = dayList.map((item) => Number(item?.close)).filter(Number.isFinite);
+  const lastDay = dayList[dayList.length - 1] || null;
+  const lastWeek = weekList[weekList.length - 1] || null;
+  const close = Number(lastDay?.close);
+  const ma20 = computeSmaFromCloses(closes, 20);
+  const aboveMa20Pct = (Number.isFinite(close) && Number.isFinite(ma20) && ma20 > 0)
+    ? ((close - ma20) / ma20) * 100
+    : null;
+  const weeklyLowerShadow = hasMeaningfulLowerShadow(lastWeek);
+
+  return {
+    isMatch: Number.isFinite(close) && Number.isFinite(ma20) && ma20 > 0 && close > ma20 && weeklyLowerShadow,
+    close: Number.isFinite(close) ? close : null,
+    ma20: Number.isFinite(ma20) ? ma20 : null,
+    aboveMa20Pct: Number.isFinite(aboveMa20Pct) ? aboveMa20Pct : null,
+    weeklyLowerShadow,
+    weeklyDate: lastWeek?.date ? String(lastWeek.date) : null,
+  };
 }
 
 function computeRsiBasicFromCloses(closes, period = 14) {
@@ -5309,6 +5353,179 @@ app.get('/api/trading-value-stocks', async (req, res) => {
       });
     }
     return res.status(500).json({ error: '거래대금 상위 종목 조회 실패', details: e?.message || String(e) });
+  }
+});
+
+app.get('/api/ma20-weekly-lower-shadow-stocks', async (req, res) => {
+  const limit = Math.max(1, Math.min(100, Number(req.query.limit ?? 100)));
+  const candidateLimit = Math.max(limit, Math.min(3000, Number(req.query.candidateLimit ?? 1200)));
+  const ttlMs = Math.max(30_000, Math.min(30 * 60_000, Number(req.query.ttlMs ?? MA20_WEEKLY_LOWER_SHADOW_STOCKS_TTL_MS_DEFAULT)));
+  const chartTtlMs = Math.max(60_000, Math.min(12 * 60 * 60 * 1000, Number(req.query.chartTtlMs ?? NAVER_FCHART_OHLC_TTL_MS_DEFAULT)));
+  const marketRaw = String(req.query.market ?? 'all').toLowerCase();
+  const market = ['kospi', 'kosdaq', 'all'].includes(marketRaw) ? marketRaw : 'all';
+  const includeSector = String(req.query.includeSector ?? '1') === '1';
+  const sectorTtlMs = Math.max(60_000, Math.min(180 * 24 * 60 * 60 * 1000, Number(req.query.sectorTtlMs ?? NAVER_SECTOR_TTL_MS_DEFAULT)));
+  const sectorConcurrency = Math.max(1, Math.min(6, Number(req.query.sectorConcurrency ?? 3)));
+  const concurrency = Math.max(1, Math.min(8, Number(req.query.concurrency ?? 4)));
+  const cacheKey = stableStringify({ market, limit, candidateLimit, includeSector, concurrency });
+
+  const now = Date.now();
+  const existing = ma20WeeklyLowerShadowStocksCacheByKey.get(cacheKey);
+  if (existing?.value && now < existing.expiresAtMs) return res.json(existing.value);
+  if (existing?.inFlight) {
+    const awaited = await existing.inFlight;
+    return res.json(awaited);
+  }
+
+  const inFlight = (async () => {
+    const [kospiItems, kosdaqItems] = await Promise.all([
+      market === 'kosdaq' ? Promise.resolve([]) : fetchNaverMarketSumAll(0),
+      market === 'kospi' ? Promise.resolve([]) : fetchNaverMarketSumAll(1),
+    ]);
+
+    const baseUniverse = [...(kospiItems || []), ...(kosdaqItems || [])]
+      .map((item) => {
+        const code = String(item?.code ?? '').trim().padStart(6, '0');
+        const priceNum = parseNumberWithCommas(item?.stck_prpr);
+        const changePctNum = Number(item?.prdy_ctrt);
+        const tradingValueNum = parseNumberWithCommas(item?.acml_tr_pbmn);
+        return {
+          ...item,
+          code,
+          stck_prpr: Number.isFinite(priceNum) ? String(Math.round(priceNum)) : (item?.stck_prpr ?? null),
+          prdy_ctrt: Number.isFinite(changePctNum) ? String(changePctNum) : (item?.prdy_ctrt ?? null),
+          acml_tr_pbmn: Number.isFinite(tradingValueNum) ? String(Math.round(tradingValueNum)) : (item?.acml_tr_pbmn ?? null),
+        };
+      })
+      .filter((item) => /^[0-9]{6}$/.test(String(item?.code ?? '')))
+      .sort((a, b) => {
+        const av = parseNumberWithCommas(a?.acml_tr_pbmn);
+        const bv = parseNumberWithCommas(b?.acml_tr_pbmn);
+        const aFinite = Number.isFinite(av);
+        const bFinite = Number.isFinite(bv);
+        if (!aFinite && !bFinite) return String(a?.code ?? '').localeCompare(String(b?.code ?? ''), 'ko', { numeric: true, sensitivity: 'base' });
+        if (!aFinite) return 1;
+        if (!bFinite) return -1;
+        if (bv !== av) return bv - av;
+        return String(a?.code ?? '').localeCompare(String(b?.code ?? ''), 'ko', { numeric: true, sensitivity: 'base' });
+      })
+      .slice(0, candidateLimit);
+
+    const matches = [];
+    let cursor = 0;
+
+    await Promise.all(Array.from({ length: concurrency }, () => (async () => {
+      while (true) {
+        if (matches.length >= limit) return;
+        const currentIndex = cursor;
+        cursor += 1;
+        if (currentIndex >= baseUniverse.length) return;
+
+        const item = baseUniverse[currentIndex];
+        if (!item) continue;
+
+        try {
+          const [dailyPayload, weeklyPayload] = await Promise.all([
+            getNaverFchartOhlcCached(chartTtlMs, { symbol: item.code, timeframe: 'day', count: 80 }),
+            getNaverFchartOhlcCached(chartTtlMs, { symbol: item.code, timeframe: 'week', count: 40 }),
+          ]);
+          const evaluated = evaluateMa20WeeklyLowerShadowCandidate({
+            dailyItems: dailyPayload?.items,
+            weeklyItems: weeklyPayload?.items,
+          });
+          if (!evaluated?.isMatch) continue;
+
+          matches.push({
+            code: item.code,
+            name: item?.name ?? item?.hts_kor_isnm ?? item.code,
+            stck_prpr: item?.stck_prpr ?? null,
+            prdy_ctrt: item?.prdy_ctrt ?? null,
+            acml_tr_pbmn: item?.acml_tr_pbmn ?? null,
+            close: evaluated.close,
+            ma20: evaluated.ma20,
+            aboveMa20Pct: evaluated.aboveMa20Pct,
+            weeklyDate: evaluated.weeklyDate,
+          });
+        } catch {
+        }
+      }
+    })()));
+
+    const items = matches
+      .slice()
+      .sort((a, b) => {
+        const ap = Number(a?.aboveMa20Pct);
+        const bp = Number(b?.aboveMa20Pct);
+        if (Number.isFinite(ap) || Number.isFinite(bp)) {
+          const diff = (Number.isFinite(bp) ? bp : -Infinity) - (Number.isFinite(ap) ? ap : -Infinity);
+          if (diff !== 0) return diff;
+        }
+        const av = parseNumberWithCommas(a?.acml_tr_pbmn);
+        const bv = parseNumberWithCommas(b?.acml_tr_pbmn);
+        if (Number.isFinite(av) || Number.isFinite(bv)) {
+          const diff = (Number.isFinite(bv) ? bv : -Infinity) - (Number.isFinite(av) ? av : -Infinity);
+          if (diff !== 0) return diff;
+        }
+        return String(a?.code ?? '').localeCompare(String(b?.code ?? ''), 'ko', { numeric: true, sensitivity: 'base' });
+      })
+      .slice(0, limit);
+
+    if (includeSector && items.length > 0) {
+      const resolved = await mapWithConcurrency(items.map((item) => item.code), sectorConcurrency, async (code) => {
+        try {
+          return await getNaverSectorCached(code, sectorTtlMs);
+        } catch {
+          return { code, sector: null };
+        }
+      });
+
+      const sectorByCode = new Map();
+      for (const item of resolved || []) {
+        const code = String(item?.code ?? '').trim().padStart(6, '0');
+        if (!/^[0-9]{6}$/.test(code)) continue;
+        sectorByCode.set(code, item?.sector ?? null);
+      }
+
+      for (const item of items) {
+        item.sector = sectorByCode.has(item.code) ? sectorByCode.get(item.code) : null;
+      }
+    }
+
+    return {
+      market,
+      count: items.length,
+      scannedCount: baseUniverse.length,
+      items,
+      sectorIncluded: includeSector,
+      updatedAt: new Date().toISOString(),
+      source: 'naver-market-sum+fchart',
+    };
+  })();
+
+  ma20WeeklyLowerShadowStocksCacheByKey.set(cacheKey, {
+    value: existing?.value ?? null,
+    expiresAtMs: existing?.expiresAtMs ?? 0,
+    inFlight,
+  });
+
+  try {
+    const payload = await inFlight;
+    ma20WeeklyLowerShadowStocksCacheByKey.set(cacheKey, {
+      value: payload,
+      expiresAtMs: Date.now() + ttlMs,
+      inFlight: null,
+    });
+    return res.json(payload);
+  } catch (e) {
+    const latest = ma20WeeklyLowerShadowStocksCacheByKey.get(cacheKey);
+    if (latest?.inFlight === inFlight) {
+      ma20WeeklyLowerShadowStocksCacheByKey.set(cacheKey, {
+        value: latest?.value ?? null,
+        expiresAtMs: latest?.expiresAtMs ?? 0,
+        inFlight: null,
+      });
+    }
+    return res.status(500).json({ error: '20일선 상위 주봉 아래꼬리 종목 조회 실패', details: e?.message || String(e) });
   }
 });
 
