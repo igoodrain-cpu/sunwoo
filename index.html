@@ -2358,6 +2358,14 @@
 			return Array.isArray(j.items) ? j.items : [];
 		}
 
+		async function refreshPopupLatestItemsFromBackend() {
+			const items = await fetchDecliners();
+			latestItems = Array.isArray(items) ? items : [];
+			try { renderTable(); } catch {}
+			try { updateSortHeaderLabels(); } catch {}
+			return latestItems;
+		}
+
 		function chunk(arr, size) {
 			const out = [];
 			for (let i = 0; i < arr.length; i += size) out.push(arr.slice(i, i + size));
@@ -3526,7 +3534,7 @@
 				return;
 			}
 			renderTradingModal();
-			refreshTradingCandidates().catch(() => {});
+			refreshTradingCandidates({ forceBackend: true }).catch(() => {});
 		}
 
 		function renderTradingValueModal() {
@@ -3768,8 +3776,31 @@
 			};
 		}
 
-		async function refreshTradingCandidates() {
+		async function refreshTradingCandidates(options = {}) {
+			const { forceBackend = false } = options;
 			if (!isTradingModalDisplayActive()) return;
+			if (forceBackend) {
+				try {
+					await refreshPopupLatestItemsFromBackend();
+				} catch (e) {
+					tradingModalLoading = false;
+					tradingModalMatches = [];
+					tradingModalScanStats = {
+						scanned: 0,
+						total: 0,
+						matched: 0,
+						exhausted: true,
+					};
+					const hintEl = document.getElementById('tradingModalHint');
+					if (hintEl) hintEl.textContent = `조회 실패: ${e?.message || String(e)} (${getTradingContextText()})`;
+					const contentEl = document.getElementById('tradingModalContent');
+					if (contentEl) {
+						contentEl.classList.add('muted');
+						contentEl.innerHTML = `<div class="muted">백엔드 데이터 조회 실패: ${escapeHtml(e?.message || String(e))}</div>`;
+					}
+					return;
+				}
+			}
 			const candidates = getTradingUniverseItems();
 			const scanId = ++tradingModalScanId;
 			tradingModalLoading = true;
@@ -4130,7 +4161,7 @@
 			if (e.target?.id === 'sectorModalOverlay') setSectorModalVisible(false);
 		});
 		document.getElementById('tradingRefreshBtn')?.addEventListener('click', () => {
-			refreshTradingCandidates().catch(() => {});
+			refreshTradingCandidates({ forceBackend: true }).catch(() => {});
 		});
 		document.getElementById('tradingModalCloseBtn')?.addEventListener('click', () => setTradingModalVisible(false));
 		document.getElementById('tradingModalOverlay')?.addEventListener('click', (e) => {
