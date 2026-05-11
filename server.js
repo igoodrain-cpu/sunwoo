@@ -980,16 +980,19 @@ function parseNaverCompanyAnalysisUnitFromHtml($, $table) {
 function parseNaverAnnualColumnLabelsFromCompanyAnalysisTable($, $table) {
   if (!$ || !$table) return null;
 
-  // 1) "최근 연간 실적" colspan을 우선 신뢰
+  // 1) 상단 헤더의 연간 블록 colspan 합계(최근 연간 실적 + 연간 추정 실적)를 우선 신뢰
   let annualCount = null;
   const topHeader = $table.find('thead tr.t_line').first();
-  const annualTh = topHeader.find('th').filter((_, el) => {
-    const t = String($(el).text() || '').replace(/\s+/g, ' ').trim();
-    return t.includes('최근 연간 실적');
-  }).first();
-  if (annualTh && annualTh.length) {
-    const cs = Number(annualTh.attr('colspan'));
-    if (Number.isFinite(cs) && cs > 0) annualCount = cs;
+  if (topHeader && topHeader.length) {
+    const annualColspans = topHeader.find('th').toArray().map((el) => {
+      const text = String($(el).text() || '').replace(/\s+/g, ' ').trim();
+      const colspan = Number($(el).attr('colspan'));
+      if (!Number.isFinite(colspan) || colspan <= 0) return 0;
+      return (text.includes('연간') && !text.includes('분기')) ? colspan : 0;
+    }).filter((count) => count > 0);
+    if (annualColspans.length > 0) {
+      annualCount = annualColspans.reduce((sum, count) => sum + count, 0);
+    }
   }
 
   // 2) 연/월 라벨이 있는 헤더 행에서 라벨 리스트 수집
@@ -1048,6 +1051,14 @@ function normalizeFinanceRowLabel(text) {
   return String(text || '').replace(/\u00a0/g, ' ').replace(/\s+/g, ' ').trim();
 }
 
+function parseAnnualLabelYear(label) {
+  const text = String(label || '').replace(/\s+/g, ' ').trim();
+  const match = text.match(/(\d{4})[./]\d{2}/);
+  if (!match) return null;
+  const year = Number(match[1]);
+  return Number.isFinite(year) ? year : null;
+}
+
 function parseFnGuideAnnualRowFromFinanceHtml(html, rowLabel) {
   const $ = cheerio.load(String(html || ''));
   const wanted = normalizeFinanceRowLabel(rowLabel);
@@ -1064,7 +1075,7 @@ function parseFnGuideAnnualRowFromFinanceHtml(html, rowLabel) {
 
     const annualLabels = $table.find('thead tr').last().find('th').toArray()
       .map(th => normalizeFinanceRowLabel($(th).text()))
-      .filter(text => /^\d{4}\/\d{2}$/.test(text));
+      .filter(text => /\d{4}\/\d{2}(?:\([A-Z]\))?/.test(text));
     if (annualLabels.length === 0) continue;
 
     const $row = $table.find('tbody tr').filter((_, tr) => {
@@ -1128,7 +1139,7 @@ function pickPreferredAnnualEstimate(parsed, preferYear) {
   if (!parsed?.annualLabels || !parsed?.annualValues) return null;
   const entries = parsed.annualLabels.map((label, i) => {
     const lbl = String(label || '').replace(/\s+/g, ' ').trim();
-    const year = Number((lbl.match(/^(\d{4})\./) || [])[1]);
+    const year = parseAnnualLabelYear(lbl);
     const value = parsed.annualValues[i];
     const isEstimate = /\(\s*E\s*\)|\bE\b|추정|예상/i.test(lbl);
     return {
@@ -1153,6 +1164,35 @@ function pickPreferredAnnualEstimate(parsed, preferYear) {
     .sort((a, b) => (a.year - b.year) || String(a.label).localeCompare(String(b.label)))
     .pop();
   return latest || null;
+}
+
+function extractAnnualEstimateEntries(parsed, options = {}) {
+  if (!parsed?.annualLabels || !parsed?.annualValues) return [];
+  const minYear = Number.isFinite(Number(options.minYear)) ? Number(options.minYear) : new Date().getFullYear();
+  const maxCount = Math.max(1, Math.min(10, Number(options.maxCount ?? 3)));
+
+  const entries = parsed.annualLabels.map((label, i) => {
+    const lbl = String(label || '').replace(/\s+/g, ' ').trim();
+    const year = parseAnnualLabelYear(lbl);
+    const value = parsed.annualValues[i];
+    const isEstimate = /\(\s*E\s*\)|\bE\b|추정|예상/i.test(lbl);
+    return {
+      label: lbl,
+      year: Number.isFinite(year) ? year : null,
+      value: (value === null || value === undefined) ? null : Number(value),
+      isEstimate,
+    };
+  }).filter(e => e.year && e.year >= minYear && Number.isFinite(e.value));
+
+  const picked = entries
+    .filter(e => e.isEstimate)
+    .sort((a, b) => (a.year - b.year) || String(a.label).localeCompare(String(b.label)));
+
+  const fallback = entries
+    .filter(e => !e.isEstimate)
+    .sort((a, b) => (a.year - b.year) || String(a.label).localeCompare(String(b.label)));
+
+  return [...picked, ...fallback].slice(0, maxCount);
 }
 
 function parseNaverListedSharesFromItemMainHtml(html) {
@@ -1691,6 +1731,7 @@ async function getNaverOperatingProfit(code) {
 
   const nowYear = new Date().getFullYear();
   const recentYears = Array.from({ length: 5 }, (_, idx) => nowYear - (idx + 1));
+  const naverEstimateEntries = extractAnnualEstimateEntries(parsed, { minYear: nowYear, maxCount: 3 });
 
   const findByYear = (year) => {
     const idx = parsed.annualLabels.findIndex(lbl => String(lbl).startsWith(String(year)));
@@ -1706,8 +1747,9 @@ async function getNaverOperatingProfit(code) {
     const found = findByYear(year);
     return !(found?.label || Number.isFinite(found?.value));
   });
+  const needsEstimateSupplement = naverEstimateEntries.length < 3;
 
-  if (needsOlderHistory) {
+  if (needsOlderHistory || needsEstimateSupplement) {
     try {
       const fnGuideHtml = await fetchFnGuideHtml('/SVO2/ASP/SVD_Main.asp', {
         pGB: 1,
@@ -1726,7 +1768,7 @@ async function getNaverOperatingProfit(code) {
 
   const findFnGuideByYear = (year) => {
     if (!fnGuideParsed?.annualLabels?.length) return null;
-    const idx = fnGuideParsed.annualLabels.findIndex(lbl => String(lbl).startsWith(String(year)));
+    const idx = fnGuideParsed.annualLabels.findIndex(lbl => parseAnnualLabelYear(lbl) === year);
     if (idx < 0) return null;
     return {
       label: fnGuideParsed.annualLabels[idx] ?? null,
@@ -1744,12 +1786,30 @@ async function getNaverOperatingProfit(code) {
     };
   });
 
+  const estimateMap = new Map();
+  for (const entry of naverEstimateEntries) {
+    if (!estimateMap.has(entry.year)) estimateMap.set(entry.year, entry);
+  }
+  for (const entry of extractAnnualEstimateEntries(fnGuideParsed, { minYear: nowYear, maxCount: 3 })) {
+    if (!estimateMap.has(entry.year)) estimateMap.set(entry.year, entry);
+  }
+  const estimatedOpProfits = Array.from(estimateMap.values())
+    .sort((a, b) => (a.year - b.year) || String(a.label).localeCompare(String(b.label)))
+    .slice(0, 3)
+    .map((entry) => ({
+      year: entry.year,
+      label: entry.label,
+      value: entry.value,
+      isEstimate: !!entry.isEstimate,
+    }));
+
   const [last, prev, third, fourth, fifth] = annualOpProfits;
 
   return {
     code: itemCode,
     unit: parsed.unit || '억원',
     annualOpProfits,
+    estimatedOpProfits,
     lastYear: last?.year ?? null,
     prevYear: prev?.year ?? null,
     thirdYear: third?.year ?? null,
@@ -5814,6 +5874,7 @@ app.get('/api/op-profits', async (req, res) => {
           code,
           unit: '억원',
           annualOpProfits,
+          estimatedOpProfits: [],
           lastYear: annualOpProfits[0].year,
           prevYear: annualOpProfits[1].year,
           thirdYear: annualOpProfits[2].year,

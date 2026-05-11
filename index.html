@@ -253,6 +253,11 @@
 		.opProfitTable tr:last-child th, .opProfitTable tr:last-child td { border-bottom: none; }
 		.opProfitTable th { text-align: left; color: var(--muted); font-weight: 700; }
 		.opProfitTable td { text-align: right; }
+		.opProfitTable .opProfitDivider th {
+			color: var(--text);
+			background: rgba(255,255,255,.05);
+			font-weight: 800;
+		}
 
 		.link { color: rgba(240,244,255,.85); text-decoration: none; }
 		.link:hover { text-decoration: underline; }
@@ -1780,6 +1785,19 @@
 			if (!Number.isFinite(n)) return '-';
 			// 영업이익은 + 기호 없이 표시(음수만 - 유지)
 			return `${Math.round(n).toLocaleString('ko-KR')}`;
+		}
+
+		function normalizeEstimateYearLabel(label, fallbackYear, isEstimate = false) {
+			const raw = String(label ?? '').replace(/\s+/g, ' ').trim();
+			const matched = raw.match(/(\d{4})[./](\d{2})(?:\(([A-Z])\))?/i);
+			if (matched) {
+				const year = matched[1];
+				const month = matched[2];
+				const suffix = matched[3] ? `(${matched[3].toUpperCase()})` : (isEstimate ? '(E)' : '');
+				return `${year}.${month}${suffix}`;
+			}
+			if (Number.isFinite(Number(fallbackYear))) return `${fallbackYear}${isEstimate ? '(E)' : ''}`;
+			return raw || '-';
 		}
 
 		function formatEok(value, digits = 1) {
@@ -3954,6 +3972,7 @@
 				const rows = Array.isArray(item?.annualOpProfits) && item.annualOpProfits.length
 					? item.annualOpProfits.map((r2) => ({
 						year: Number(r2?.year),
+						label: String(r2?.label ?? ''),
 						value: r2?.value,
 					})).filter(r2 => Number.isFinite(r2.year))
 					: [
@@ -3967,6 +3986,17 @@
 				// 최신 연도가 위로 오도록 정렬
 				rows.sort((a, b) => b.year - a.year);
 
+				const estimatedRows = Array.isArray(item?.estimatedOpProfits) && item.estimatedOpProfits.length
+					? item.estimatedOpProfits.map((r2) => ({
+						year: Number(r2?.year),
+						label: String(r2?.label ?? ''),
+						value: r2?.value,
+						isEstimate: !!r2?.isEstimate,
+					})).filter(r2 => Number.isFinite(r2.year))
+					: [];
+
+				estimatedRows.sort((a, b) => a.year - b.year);
+
 				const html = [
 					'<table class="opProfitTable">',
 					'<thead><tr><th>연도</th><th class="right">영업이익</th></tr></thead>',
@@ -3974,6 +4004,12 @@
 					...rows.map(rr => {
 						const v = formatMaybeInt(rr.value);
 						return `<tr><th scope="row">${rr.year}</th><td class="right">${v}</td></tr>`;
+					}),
+					...(estimatedRows.length ? ['<tr class="opProfitDivider"><th colspan="2" scope="rowgroup">추정 영업이익 (네이버)</th></tr>'] : []),
+					...estimatedRows.map(rr => {
+						const v = formatMaybeInt(rr.value);
+						const label = normalizeEstimateYearLabel(rr.label, rr.year, rr.isEstimate);
+						return `<tr><th scope="row">${escapeHtml(label)}</th><td class="right">${v}</td></tr>`;
 					}),
 					'</tbody></table>',
 				].join('');
