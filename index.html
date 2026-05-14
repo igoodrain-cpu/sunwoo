@@ -1088,6 +1088,7 @@
 		let tradingValueUniverseItems = [];
 		let tradingValueSortKey = 'tradingValueNum';
 		let tradingValueSortDir = 'desc';
+		let tradingValueModalScrollState = { modalBodyTop: 0, tableWrapTop: 0 };
 		let ma20WeeklyLowerShadowModalOpen = false;
 		let ma20WeeklyLowerShadowModalLoading = false;
 		let ma20WeeklyLowerShadowItems = [];
@@ -3563,8 +3564,17 @@
 			const modalBodyEl = document.querySelector('#tradingValueModalPanel .modalBody');
 			const prevTableWrapEl = contentEl.querySelector('.favoritesTableWrap');
 			const scrollState = {
-				modalBodyTop: modalBodyEl?.scrollTop ?? 0,
-				tableWrapTop: prevTableWrapEl?.scrollTop ?? 0,
+				modalBodyTop: modalBodyEl ? modalBodyEl.scrollTop : tradingValueModalScrollState.modalBodyTop,
+				tableWrapTop: prevTableWrapEl ? prevTableWrapEl.scrollTop : tradingValueModalScrollState.tableWrapTop,
+			};
+			tradingValueModalScrollState = scrollState;
+			const restoreScroll = () => {
+				const nextTableWrapEl = contentEl.querySelector('.favoritesTableWrap');
+				if (nextTableWrapEl) {
+					nextTableWrapEl.scrollTop = scrollState.tableWrapTop;
+					return;
+				}
+				if (modalBodyEl) modalBodyEl.scrollTop = scrollState.modalBodyTop;
 			};
 			const rows = getTradingValueUniverseItems()
 				.filter((item) => Number.isFinite(parseNumber(item?.acml_tr_pbmn)))
@@ -3598,7 +3608,8 @@
 			if (rows.length === 0) {
 				contentEl.classList.add('muted');
 				contentEl.innerHTML = `<div class="muted">${tradingValueModalLoading ? '거래대금 상위 종목을 조회하고 있습니다...' : '표시할 종목이 없습니다.'}</div>`;
-				if (modalBodyEl) modalBodyEl.scrollTop = scrollState.modalBodyTop;
+				restoreScroll();
+				requestAnimationFrame(restoreScroll);
 				return;
 			}
 
@@ -3626,12 +3637,8 @@
 				rowsHtml,
 				'</tbody></table></div>',
 			].join('');
-			const nextTableWrapEl = contentEl.querySelector('.favoritesTableWrap');
-			if (nextTableWrapEl) {
-				nextTableWrapEl.scrollTop = scrollState.tableWrapTop;
-			} else if (modalBodyEl) {
-				modalBodyEl.scrollTop = scrollState.modalBodyTop;
-			}
+			restoreScroll();
+			requestAnimationFrame(restoreScroll);
 		}
 
 		function setTradingValueModalVisible(visible) {
@@ -3642,6 +3649,7 @@
 			overlay.setAttribute('aria-hidden', tradingValueModalOpen ? 'false' : 'true');
 			if (!tradingValueModalOpen) {
 				tradingValueModalLoading = false;
+				tradingValueModalScrollState = { modalBodyTop: 0, tableWrapTop: 0 };
 				return;
 			}
 			renderTradingValueModal();
