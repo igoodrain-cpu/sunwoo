@@ -1059,7 +1059,6 @@
 			if (document.visibilityState !== 'visible') return;
 			if (isFavoritesModalDisplayActive()) refreshFavoritesModalVisibleData({ force: true }).catch(() => {});
 			if (isTradingModalDisplayActive()) refreshTradingCandidates().catch(() => {});
-			if (isTradingValueModalDisplayActive()) refreshTradingValueCandidates().catch(() => {});
 			if (isMa20WeeklyLowerShadowModalDisplayActive()) refreshMa20WeeklyLowerShadowCandidates().catch(() => {});
 			if (isUsCpiModalDisplayActive()) openUsCpiModal().catch(() => {});
 			if (isUsRateModalDisplayActive()) openUsRateModal().catch(() => {});
@@ -1086,6 +1085,7 @@
 		let tradingValueModalOpen = false;
 		let tradingValueModalLoading = false;
 		let tradingValueUniverseItems = [];
+		let tradingValueModalSnapshotItems = [];
 		let tradingValueSortKey = 'tradingValueNum';
 		let tradingValueSortDir = 'desc';
 		let tradingValueModalScrollState = { modalBodyTop: 0, tableWrapTop: 0 };
@@ -3406,9 +3406,11 @@
 		}
 
 		function getTradingValueUniverseItems() {
-			const source = Array.isArray(tradingValueUniverseItems) && tradingValueUniverseItems.length
-				? tradingValueUniverseItems
-				: latestItems;
+			const source = (isTradingValueModalDisplayActive() && Array.isArray(tradingValueModalSnapshotItems) && tradingValueModalSnapshotItems.length)
+				? tradingValueModalSnapshotItems
+				: (Array.isArray(tradingValueUniverseItems) && tradingValueUniverseItems.length
+					? tradingValueUniverseItems
+					: latestItems);
 			return source.slice().sort((a, b) => {
 				const av = parseNumber(a?.acml_tr_pbmn);
 				const bv = parseNumber(b?.acml_tr_pbmn);
@@ -3649,9 +3651,11 @@
 			overlay.setAttribute('aria-hidden', tradingValueModalOpen ? 'false' : 'true');
 			if (!tradingValueModalOpen) {
 				tradingValueModalLoading = false;
+				tradingValueModalSnapshotItems = [];
 				tradingValueModalScrollState = { modalBodyTop: 0, tableWrapTop: 0 };
 				return;
 			}
+			tradingValueModalSnapshotItems = Array.isArray(tradingValueUniverseItems) ? tradingValueUniverseItems.slice() : [];
 			renderTradingValueModal();
 			refreshTradingValueCandidates().catch(() => {});
 		}
@@ -3890,8 +3894,10 @@
 			renderTradingValueModal();
 			try {
 				tradingValueUniverseItems = await fetchTradingValueUniverse();
+				tradingValueModalSnapshotItems = Array.isArray(tradingValueUniverseItems) ? tradingValueUniverseItems.slice() : [];
 			} catch {
 				tradingValueUniverseItems = [];
+				tradingValueModalSnapshotItems = [];
 			}
 			tradingValueModalLoading = false;
 			setModalUpdatedAt('tradingValueModalUpdatedAt', new Date());
