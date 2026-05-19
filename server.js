@@ -471,7 +471,7 @@ const vkospiCache = {
 };
 
 // ✅ 공포탐욕지수(Fear & Greed Index) 캐시
-// - Data source: alternative.me (public JSON)
+// - Data source: CNN Fear & Greed (미국 주식시장 심리 지수)
 // - UI는 코스피200 야간선물과 동일 주기로 갱신합니다.
 const FEAR_GREED_TTL_MS_DEFAULT = 30 * 1000; // 30s
 const fearGreedCache = {
@@ -586,8 +586,8 @@ const yahooClient = axios.create({
   },
 });
 
-const alternativeMeClient = axios.create({
-  baseURL: 'https://api.alternative.me',
+const cnnFearGreedClient = axios.create({
+  baseURL: 'https://production.dataviz.cnn.io',
   timeout: 10_000,
   headers: {
     'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36',
@@ -2821,26 +2821,22 @@ async function getFearGreedCached(ttlMs) {
   if (fearGreedCache.inFlight) return fearGreedCache.inFlight;
 
   const inFlight = (async () => {
-    const res = await alternativeMeClient.get('/fng/', {
-      params: {
-        limit: 1,
-        format: 'json',
-      },
-    });
+    const res = await cnnFearGreedClient.get('/index/fearandgreed/graphdata');
 
-    const item = res?.data?.data?.[0] ?? null;
-    const value = Number(item?.value);
+    const item = res?.data?.fear_and_greed ?? null;
+    const value = Number(item?.score);
     if (!Number.isFinite(value)) {
       const err = new Error('Fear&Greed value 파싱 실패');
       err.code = 'FEAR_GREED_PARSE_FAILED';
       throw err;
     }
 
-    const classification = (item?.value_classification ? String(item.value_classification) : '').trim() || null;
-    const timestampSec = Number(item?.timestamp);
-    const time = Number.isFinite(timestampSec) ? formatKstYmdHm(timestampSec * 1000) : null;
+    const classification = (item?.rating ? String(item.rating) : '').trim() || null;
+    const timestampMs = Date.parse(item?.timestamp ?? '');
+    const time = Number.isFinite(timestampMs) ? formatKstYmdHm(timestampMs) : null;
 
-    const prevValue = Number(fearGreedCache.value?.value);
+    const previousClose = Number(item?.previous_close);
+    const prevValue = Number.isFinite(previousClose) ? previousClose : Number(fearGreedCache.value?.value);
     const change = Number.isFinite(prevValue) ? (value - prevValue) : null;
     const direction = (typeof change === 'number') ? (change > 0 ? 'up' : change < 0 ? 'down' : 'flat') : 'flat';
 
@@ -2855,7 +2851,7 @@ async function getFearGreedCached(ttlMs) {
       direction,
       classification,
       updatedAt: new Date().toISOString(),
-      sourceUrl: 'https://alternative.me/crypto/fear-and-greed-index/',
+      sourceUrl: 'https://edition.cnn.com/markets/fear-and-greed',
     };
 
     fearGreedCache.value = payload;
