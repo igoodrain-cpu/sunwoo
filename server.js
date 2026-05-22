@@ -487,6 +487,13 @@ const marketDepositCache = {
   inFlight: null,
 };
 
+const FORCED_SELLING_TTL_MS_DEFAULT = 5 * 60 * 1000; // 5m
+const forcedSellingCache = {
+  value: null,
+  expiresAtMs: 0,
+  inFlight: null,
+};
+
 // ✅ 미국 지수 선물 (나스닥100, S&P500) 캐시
 const US_FUTURES_TTL_MS_DEFAULT = 30 * 1000; // 30s
 const usFuturesCacheBySymbol = new Map();
@@ -4150,6 +4157,35 @@ async function fetchKofiaIndexHtml() {
   return decodeNaverHtml(response.data);
 }
 
+function buildKofiaForcedSellingRequestBody() {
+  const endYmd = getKstYmd();
+  const startYmd = shiftKstYmd(endYmd, -90) || endYmd;
+  return {
+    dmSearch: {
+      tmpV40: '1000000',
+      tmpV41: '1',
+      tmpV1: 'D',
+      tmpV45: startYmd,
+      tmpV46: endYmd,
+      OBJ_NM: 'STATSCU0100000060BO',
+    },
+  };
+}
+
+async function fetchKofiaMarketFundingTrendJson() {
+  const response = await kofiaClient.post('/meta/getMetaDataList.do', buildKofiaForcedSellingRequestBody(), {
+    timeout: 20_000,
+    responseType: 'json',
+    headers: {
+      'Content-Type': 'application/json; charset=UTF-8',
+      'X-Requested-With': 'XMLHttpRequest',
+      Referer: 'https://freesis.kofia.or.kr/stat/FreeSIS.do?parentDivId=MSIS10000000000000&serviceId=STATSCU0100000060',
+      Accept: 'application/json, text/plain, */*',
+    },
+  });
+  return response.data;
+}
+
 function parseInvestorDepositFromKofiaIndexHtml(html) {
   const $ = cheerio.load(html);
   const anchor = $("a[onclick*='OS0021']").first();
@@ -4185,6 +4221,53 @@ function parseInvestorDepositFromKofiaIndexHtml(html) {
   };
 }
 
+function parseForcedSellingFromKofiaMarketFundingTrendJson(data) {
+  if (typeof data === 'string') {
+    try {
+      return parseForcedSellingFromKofiaMarketFundingTrendJson(JSON.parse(data));
+    } catch {
+      return null;
+    }
+  }
+  const rows = Array.isArray(data?.ds1) ? data.ds1 : [];
+  const latest = rows.find((row) => Number.isFinite(Number(row?.TMPV6))) || rows[0];
+  if (!latest) return null;
+
+  const dateRaw = String(latest.TMPV1 || '').trim();
+  const dateMatch = dateRaw.match(/^(\d{4})(\d{2})(\d{2})$/);
+  const date = dateMatch ? `${dateMatch[1]}/${dateMatch[2]}/${dateMatch[3]}` : null;
+  const investorDepositMillionWon = Number(latest.TMPV2);
+  const derivativesDepositMillionWon = Number(latest.TMPV3);
+  const rpSellBalanceMillionWon = Number(latest.TMPV4);
+  const receivablesMillionWon = Number(latest.TMPV5);
+  const forcedSellingMillionWon = Number(latest.TMPV6);
+  const forcedSellingRatioPct = Number(latest.TMPV7);
+  if (!Number.isFinite(forcedSellingMillionWon)) return null;
+
+  const forcedSellingKrw = forcedSellingMillionWon * 1_000_000;
+  const forcedSellingEok = forcedSellingMillionWon / 100;
+  const roundedEok = Math.round(forcedSellingEok * 10) / 10;
+  const isIntegerLike = Math.abs(roundedEok - Math.round(roundedEok)) < 1e-9;
+
+  return {
+    date,
+    unit: '백만원',
+    investorDepositMillionWon: Number.isFinite(investorDepositMillionWon) ? investorDepositMillionWon : null,
+    derivativesDepositMillionWon: Number.isFinite(derivativesDepositMillionWon) ? derivativesDepositMillionWon : null,
+    rpSellBalanceMillionWon: Number.isFinite(rpSellBalanceMillionWon) ? rpSellBalanceMillionWon : null,
+    receivablesMillionWon: Number.isFinite(receivablesMillionWon) ? receivablesMillionWon : null,
+    forcedSellingMillionWon,
+    forcedSellingKrw,
+    forcedSellingEok,
+    forcedSellingRatioPct: Number.isFinite(forcedSellingRatioPct) ? forcedSellingRatioPct : null,
+    display: `${roundedEok.toLocaleString('ko-KR', {
+      minimumFractionDigits: isIntegerLike ? 0 : 1,
+      maximumFractionDigits: 1,
+    })}억`,
+    sourceUrl: 'https://freesis.kofia.or.kr/stat/FreeSIS.do?parentDivId=MSIS10000000000000&serviceId=STATSCU0100000060',
+  };
+}
+
 async function getMarketDepositCached(ttlMs) {
   const now = Date.now();
   if (marketDepositCache.value && now < marketDepositCache.expiresAtMs) return marketDepositCache.value;
@@ -4204,7 +4287,10 @@ async function getMarketDepositCached(ttlMs) {
       ...parsed,
       valueTrillionWon,
       valueTrillionWonRounded,
-      display: `${valueTrillionWonRounded.toLocaleString('ko-KR')}조원`,
+      display: `${valueTrillionWonRounded.toLocaleString('ko-KR', {
+        minimumFractionDigits: 1,
+        maximumFractionDigits: 1,
+      })}조원`,
       updatedAt: new Date().toISOString(),
     };
 
@@ -4219,6 +4305,37 @@ async function getMarketDepositCached(ttlMs) {
     return await inFlight;
   } finally {
     if (marketDepositCache.inFlight === inFlight) marketDepositCache.inFlight = null;
+  }
+}
+
+async function getForcedSellingCached(ttlMs) {
+  const now = Date.now();
+  if (forcedSellingCache.value && now < forcedSellingCache.expiresAtMs) return forcedSellingCache.value;
+  if (forcedSellingCache.inFlight) return forcedSellingCache.inFlight;
+
+  const inFlight = (async () => {
+    const raw = await fetchKofiaMarketFundingTrendJson();
+    const parsed = parseForcedSellingFromKofiaMarketFundingTrendJson(raw);
+    if (!parsed) {
+      throw new Error('KOFIA 반대매매 금액 파싱 실패');
+    }
+
+    const payload = {
+      ...parsed,
+      updatedAt: new Date().toISOString(),
+    };
+
+    forcedSellingCache.value = payload;
+    forcedSellingCache.expiresAtMs = Date.now() + ttlMs;
+    forcedSellingCache.inFlight = null;
+    return payload;
+  })();
+
+  forcedSellingCache.inFlight = inFlight;
+  try {
+    return await inFlight;
+  } finally {
+    if (forcedSellingCache.inFlight === inFlight) forcedSellingCache.inFlight = null;
   }
 }
 
@@ -5058,6 +5175,29 @@ app.get('/api/market-deposit', async (req, res) => {
     return res.json(payload);
   } catch (e) {
     return res.status(500).json({ error: '증시투자 예치금 조회 실패', details: e.message });
+  }
+});
+
+// ── 금일 반대매매 금액(위탁매매 미수금 대비 실제 반대매매금액) ──
+// 브라우저 → /api/forced-selling-amount
+app.get('/api/forced-selling-amount', async (req, res) => {
+  const ttlMs = Math.max(30_000, Math.min(60 * 60 * 1000, Number(req.query.ttlMs ?? FORCED_SELLING_TTL_MS_DEFAULT)));
+  try {
+    const payload = await getForcedSellingCached(ttlMs);
+    return res.json(payload);
+  } catch (e) {
+    return res.json({
+      date: null,
+      unit: '백만원',
+      forcedSellingMillionWon: null,
+      forcedSellingKrw: null,
+      forcedSellingEok: null,
+      forcedSellingRatioPct: null,
+      display: '-',
+      sourceUrl: 'https://freesis.kofia.or.kr/stat/FreeSIS.do?parentDivId=MSIS10000000000000&serviceId=STATSCU0100000060',
+      unavailableReason: e.message,
+      updatedAt: new Date().toISOString(),
+    });
   }
 });
 

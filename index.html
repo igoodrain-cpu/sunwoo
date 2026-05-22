@@ -455,6 +455,10 @@
 					<span class="muted">베이시스</span>
 					<span id="basisText">-</span>
 				</div>
+				<div class="segment">
+					<span class="muted">금일반대매매</span>
+					<span id="forcedSellingText">-</span>
+				</div>
 			</div>
 		</div>
 	</div>
@@ -2595,6 +2599,7 @@
 				document.getElementById('status').textContent = '갱신중...';
 				const [items] = await Promise.all([
 					fetchDecliners(),
+					updateMarketDeposit().catch(() => null),
 					refreshBasisSnapshot().catch(() => null),
 				]);
 				latestItems = items;
@@ -3118,8 +3123,22 @@
 		async function updateMarketDeposit() {
 			const el = document.getElementById('marketDepositText');
 			if (!el) return;
+			const previousText = String(el.textContent || '').trim();
 			try {
 				const r = await fetch(withSidcode('/api/market-deposit'), { cache: 'no-store' });
+				const j = await r.json().catch(() => ({}));
+				if (!r.ok || j?.error) throw new Error(j?.error || `HTTP ${r.status}`);
+				el.textContent = String(j.display || '-');
+			} catch {
+				if (!previousText || previousText === '-') el.textContent = '-';
+			}
+		}
+
+		async function updateForcedSellingAmount() {
+			const el = document.getElementById('forcedSellingText');
+			if (!el) return;
+			try {
+				const r = await fetch(withSidcode('/api/forced-selling-amount'), { cache: 'no-store' });
 				const j = await r.json().catch(() => ({}));
 				if (!r.ok || j?.error) throw new Error(j?.error || `HTTP ${r.status}`);
 				el.textContent = String(j.display || '-');
@@ -4344,6 +4363,7 @@
 		updateSortHeaderLabels();
 		observeStockScreenVisibility();
 		updateMarketDeposit();
+		updateForcedSellingAmount();
 		updateOilWti();
 		updateUsFuturesNq();
 		updateUsFuturesEs();
@@ -4356,6 +4376,7 @@
 			updateStickyHeaderTopOffset();
 		});
 		setInterval(updateMarketDeposit, 60_000);
+		setInterval(updateForcedSellingAmount, 60_000);
 		setInterval(updateOilWti, 60_000);
 		setInterval(updateUsFuturesNq, 60_000);
 		setInterval(updateUsFuturesEs, 60_000);
