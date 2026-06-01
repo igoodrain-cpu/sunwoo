@@ -223,8 +223,21 @@
 			display: flex;
 			align-items: center;
 			justify-content: space-between;
+			flex-wrap: wrap;
 			gap: 10px;
 			margin-bottom: 6px;
+		}
+		.opProfitMeta {
+			display: flex;
+			gap: 10px;
+			align-items: center;
+			justify-content: flex-end;
+			flex-wrap: wrap;
+			min-width: 0;
+		}
+		#stockChartModalKeyStats {
+			white-space: normal;
+			text-align: right;
 		}
 		.opProfitTable {
 			width: 100%;
@@ -569,7 +582,7 @@
 				<div id="stockChartModalOpProfitSection" class="opProfitSection" style="display:none">
 					<div class="opProfitHeader">
 						<div class="muted">영업이익 (최근 5년)</div>
-						<div style="display:flex; gap:10px; align-items:center;">
+						<div class="opProfitMeta">
 							<div class="muted" id="stockChartModalKeyStats">-</div>
 							<div class="muted" id="stockChartModalOpProfitUnit">-</div>
 						</div>
@@ -1815,6 +1828,18 @@
 				minimumFractionDigits: isIntegerLike ? 0 : digits,
 				maximumFractionDigits: digits,
 			})}억`;
+		}
+
+		function formatMarketCapFromEok(value) {
+			const n = parseNumber(value);
+			if (!Number.isFinite(n)) return '-';
+			const eok = n;
+			const absEok = Math.abs(eok);
+			if (absEok >= 10000) {
+				const jo = eok / 10000;
+				return `${jo.toLocaleString('ko-KR', { minimumFractionDigits: 0, maximumFractionDigits: Math.abs(jo) >= 100 ? 0 : 1 })}조`;
+			}
+			return `${eok.toLocaleString('ko-KR', { minimumFractionDigits: 0, maximumFractionDigits: absEok >= 1000 ? 0 : 1 })}억`;
 		}
 
 		function escapeHtml(text) {
@@ -3984,6 +4009,7 @@
 
 				// EPS/신용(%)은 KIS 시세 응답이 더 안정적이므로 우선 사용
 				let epsNum = Number(item?.eps);
+				let marketCapText = Number.isFinite(Number(item?.marketCap)) ? formatEok(item?.marketCap) : null;
 				let creditNum = Number(item?.creditRatioPct);
 				try {
 					const r2 = await fetch(`/api/price?code=${encodeURIComponent(normalized)}`, { cache: 'no-store' });
@@ -3992,6 +4018,8 @@
 					if (r2.ok && !j2?.error) {
 						const epsKis = Number(j2?.eps);
 						if (Number.isFinite(epsKis)) epsNum = epsKis;
+						if (Number.isFinite(Number(j2?.hts_avls))) marketCapText = formatMarketCapFromEok(j2?.hts_avls);
+						else if (Number.isFinite(Number(j2?.marketCap))) marketCapText = formatEok(j2?.marketCap);
 						const creditKis = Number(j2?.whol_loan_rmnd_rate);
 						if (Number.isFinite(creditKis)) creditNum = creditKis;
 					}
@@ -3999,6 +4027,7 @@
 
 				const parts = [];
 				if (Number.isFinite(epsNum)) parts.push(`EPS: ${formatWon(epsNum)}`);
+				if (marketCapText && marketCapText !== '-') parts.push(`시가총액: ${marketCapText}`);
 				if (Number.isFinite(creditNum)) parts.push(`신용: ${formatPct(creditNum, 2)}`);
 				if (statsEl) statsEl.textContent = parts.length ? parts.join(' / ') : '-';
 
