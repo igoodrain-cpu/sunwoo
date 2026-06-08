@@ -215,6 +215,21 @@
 			max-width: 100%;
 			display: block;
 		}
+		.seriesSummary {
+			display: flex;
+			gap: 12px;
+			flex-wrap: wrap;
+			margin-bottom: 10px;
+			font-size: 13px;
+			color: var(--muted);
+		}
+		.seriesSummary strong {
+			color: var(--text);
+			font-weight: 800;
+		}
+		.seriesSummary .threshold strong {
+			color: rgba(255, 88, 88, .95);
+		}
 
 		.opProfitSection {
 			margin-top: 12px;
@@ -553,6 +568,7 @@
 				</div>
 			</div>
 			<div class="modalBody">
+				<div id="vixKeyStats" class="seriesSummary"></div>
 				<canvas id="vixChart" height="360"></canvas>
 				<div class="muted" id="vixHint" style="margin-top:10px"></div>
 			</div>
@@ -2704,6 +2720,7 @@
 			if (!vixModalOpen) {
 				try { overlay.querySelector('.modalBody')?.scrollTo?.({ top: 0 }); } catch {}
 				if (vixChart) { try { vixChart.destroy(); } catch {} vixChart = null; }
+				renderVixKeyStats([]);
 				resetModalChartCanvas('vixChart', { height: 360 });
 			}
 		}
@@ -2743,6 +2760,24 @@
 				values.push(value);
 			}
 			return { labels, values };
+		}
+
+		function renderVixKeyStats(values) {
+			const el = document.getElementById('vixKeyStats');
+			if (!el) return;
+			if (!Array.isArray(values) || values.length === 0) {
+				el.innerHTML = '<span>최신 <strong>-</strong></span><span>최저 <strong>-</strong></span><span>최고 <strong>-</strong></span><span class="threshold">기준선 <strong>15</strong></span>';
+				return;
+			}
+			const latest = values[values.length - 1];
+			const min = Math.min(...values);
+			const max = Math.max(...values);
+			el.innerHTML = `
+				<span>최신 <strong>${latest.toFixed(2)}</strong></span>
+				<span>최저 <strong>${min.toFixed(2)}</strong></span>
+				<span>최고 <strong>${max.toFixed(2)}</strong></span>
+				<span class="threshold">기준선 <strong>15</strong></span>
+			`;
 		}
 
 		function scheduleChartResize(chart) {
@@ -3095,6 +3130,7 @@
 			if (!isVixModalDisplayActive()) return;
 			const hint = document.getElementById('vixHint');
 			if (hint) hint.textContent = '로딩 중...';
+			renderVixKeyStats([]);
 			try {
 				const r = await fetch('/api/vix-series?days=1095');
 				const j = await r.json().catch(() => ({}));
@@ -3106,6 +3142,8 @@
 				});
 				const labels = series.labels;
 				const values = series.values;
+				if (!values.length) throw new Error('표시할 VIX 데이터가 없습니다.');
+				renderVixKeyStats(values);
 				if (!isVixModalDisplayActive()) return;
 				const ctx = document.getElementById('vixChart')?.getContext?.('2d');
 				if (ctx && window.Chart) {
@@ -3114,7 +3152,10 @@
 						type: 'line',
 						data: {
 							labels,
-							datasets: [{ label: 'VIX(일별)', data: values, borderWidth: 2, pointRadius: 0, tension: 0.15 }]
+							datasets: [
+								{ label: 'VIX(일별)', data: values, borderColor: 'rgba(110, 198, 255, .95)', backgroundColor: 'rgba(110, 198, 255, .15)', borderWidth: 2, pointRadius: 0, tension: 0.15 },
+								{ label: '기준선 15', data: Array(labels.length).fill(15), borderColor: 'rgba(255, 88, 88, .95)', borderWidth: 1.5, pointRadius: 0, tension: 0, borderDash: [6, 4] }
+							]
 						},
 						options: {
 							responsive: true,
@@ -3133,13 +3174,15 @@
 
 					if (hint) {
 						const updated = j.updatedAt ? `갱신: ${new Date(j.updatedAt).toLocaleString()}` : '';
-						hint.textContent = updated ? `${updated} (일별)` : '일별';
+						const sourceText = j.source ? ` / 소스: ${String(j.source).toUpperCase()}` : '';
+						hint.textContent = updated ? `${updated}${sourceText} / 붉은 점선은 VIX 15 기준선` : `일별${sourceText} / 붉은 점선은 VIX 15 기준선`;
 					}
 				} else {
 					if (hint) hint.textContent = 'Chart.js 로드 실패';
 				}
 			} catch (e) {
 				if (!isVixModalDisplayActive()) return;
+				renderVixKeyStats([]);
 				if (hint) hint.textContent = `조회 실패: ${e?.message || String(e)}`;
 			}
 		}

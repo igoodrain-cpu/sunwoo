@@ -3566,6 +3566,21 @@ function parseFredGraphCsvAll(csvText) {
   return values;
 }
 
+function parseYahooChartSeriesAll(json) {
+  const result = json?.chart?.result?.[0] ?? null;
+  const timestamps = Array.isArray(result?.timestamp) ? result.timestamp : [];
+  const closes = Array.isArray(result?.indicators?.quote?.[0]?.close) ? result.indicators.quote[0].close : [];
+  const points = [];
+  const n = Math.min(timestamps.length, closes.length);
+  for (let i = 0; i < n; i++) {
+    const close = Number(closes[i]);
+    const date = toIsoDateFromUnixSeconds(timestamps[i]);
+    if (!Number.isFinite(close) || !date) continue;
+    points.push({ date, value: close });
+  }
+  return points;
+}
+
 function formatUtcYmd(dateLike) {
   const d = dateLike instanceof Date ? dateLike : new Date(dateLike);
   if (!Number.isFinite(d.getTime())) return null;
@@ -3735,33 +3750,65 @@ async function getVixSeriesCached(ttlMs, { days } = {}) {
   if (existing?.inFlight) return existing.inFlight;
 
   const inFlight = (async () => {
-    const url = 'https://fred.stlouisfed.org/graph/fredgraph.csv?id=VIXCLS';
-    const response = await axios.get(url, { timeout: 12_000, responseType: 'text' });
-    const all = parseFredGraphCsvAll(response.data);
-    if (!Array.isArray(all) || all.length === 0) throw new Error('FRED VIXCLS 파싱 실패');
-
-    const lastDateStr = all[all.length - 1]?.date;
-    const lastTs = Date.parse(String(lastDateStr || ''));
-    const endTs = Number.isFinite(lastTs) ? lastTs : Date.now();
-    const cutoffTs = endTs - d * 24 * 60 * 60 * 1000;
-    const items = all.filter((p) => {
-      const ts = Date.parse(String(p?.date || ''));
-      if (!Number.isFinite(ts)) return false;
-      return ts >= cutoffTs && ts <= endTs;
-    });
-
-    return {
-      series: 'VIXCLS',
-      name: '빅스지수(VIX)',
-      unit: 'pt',
-      days: d,
-      count: items.length,
-      items,
-      updatedAt: new Date().toISOString(),
-      source: 'fred',
-      sourceUrl: 'https://fred.stlouisfed.org/series/VIXCLS',
-      csvUrl: url,
+    const filterSeriesByDays = (all) => {
+      if (!Array.isArray(all) || all.length === 0) return [];
+      const lastDateStr = all[all.length - 1]?.date;
+      const lastTs = Date.parse(String(lastDateStr || ''));
+      const endTs = Number.isFinite(lastTs) ? lastTs : Date.now();
+      const cutoffTs = endTs - d * 24 * 60 * 60 * 1000;
+      return all.filter((p) => {
+        const ts = Date.parse(String(p?.date || ''));
+        if (!Number.isFinite(ts)) return false;
+        return ts >= cutoffTs && ts <= endTs;
+      });
     };
+
+    try {
+      const nowSec = Math.floor(Date.now() / 1000);
+      const period1 = Math.max(0, nowSec - ((d + 30) * 24 * 60 * 60));
+      const response = await yahooClient.get(`/v8/finance/chart/${encodeURIComponent('^VIX')}`, {
+        params: {
+          period1,
+          period2: nowSec,
+          interval: '1d',
+          includePrePost: 'false',
+          events: 'div,splits',
+        },
+        timeout: 10_000,
+      });
+      const all = parseYahooChartSeriesAll(response.data).filter((point) => Number(point?.value) > 0);
+      const items = filterSeriesByDays(all);
+      if (!items.length) throw new Error('Yahoo ^VIX 파싱 실패');
+      return {
+        series: '^VIX',
+        name: '빅스지수(VIX)',
+        unit: 'pt',
+        days: d,
+        count: items.length,
+        items,
+        updatedAt: new Date().toISOString(),
+        source: 'yahoo',
+        sourceUrl: 'https://finance.yahoo.com/quote/%5EVIX/history',
+      };
+    } catch {
+      const url = 'https://fred.stlouisfed.org/graph/fredgraph.csv?id=VIXCLS';
+      const response = await axios.get(url, { timeout: 12_000, responseType: 'text' });
+      const all = parseFredGraphCsvAll(response.data);
+      if (!Array.isArray(all) || all.length === 0) throw new Error('FRED VIXCLS 파싱 실패');
+      const items = filterSeriesByDays(all);
+      return {
+        series: 'VIXCLS',
+        name: '빅스지수(VIX)',
+        unit: 'pt',
+        days: d,
+        count: items.length,
+        items,
+        updatedAt: new Date().toISOString(),
+        source: 'fred',
+        sourceUrl: 'https://fred.stlouisfed.org/series/VIXCLS',
+        csvUrl: url,
+      };
+    }
   })();
 
   vixSeriesCacheByKey.set(cacheKey, {
