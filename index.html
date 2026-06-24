@@ -367,6 +367,7 @@
 			top: 0;
 			z-index: 1;
 		}
+		#stockTable .sectorCell,
 		#tradingValueModalContent .sectorCell {
 			font-size: 12px;
 			color: var(--muted);
@@ -499,6 +500,7 @@
 						<tr>
 							<th class="sortable" data-sort-key="name">종목</th>
 							<th class="sortable" data-sort-key="code">코드</th>
+							<th class="sortable" data-sort-key="sector">섹터</th>
 							<th class="sortable right" data-sort-key="price">현재가</th>
 							<th class="sortable right" data-sort-key="changePct">등락률</th>
 							<th class="sortable right" data-sort-key="rsi14">RSI(50~60)</th>
@@ -1671,6 +1673,7 @@
 						contentEl.innerHTML = '<div class="muted">로딩중...</div>';
 					}
 					try { renderFavoritesModal(); } catch {}
+
 				} catch {}
 
 				// 2) 2차 렌더: 모달이 열려있는 동안에만 전체 스냅샷을 미리 조회 후 최종 렌더
@@ -1894,7 +1897,7 @@
 
 			const headerCells = Array.from(document.querySelectorAll('#stockTable thead th'));
 			const allHeaders = headerCells.map((th) => {
-				const base = th.getAttribute('data-base-label') || th.textContent;
+				const base = th.getAttribute('data-base-label') || th.textContent.replace(/[▲▼]\s*$/, '').trim();
 				return baseHeaderLabel(base);
 			});
 			const headerIndexByLabel = new Map(allHeaders.map((label, idx) => [label, idx]));
@@ -2018,16 +2021,17 @@
 			const code = String(item?.code ?? '').padStart(6, '0');
 			const t = targetsByCode.get(code) || null;
 			const f = foreignFlowByCode.get(code) || null;
-				const m = maSignalsByCode.get(code) || null;
+			const m = maSignalsByCode.get(code) || null;
 			const s = sidewaysByCode.get(code) || null;
 			switch (key) {
 				case 'name': return String(item?.name || item?.hts_kor_isnm || code || '');
 				case 'code': return code;
+				case 'sector': return String(item?.sector ?? '').trim() || getItemSectorLabels(item).join(', ') || '-';
 				case 'price': return parseNumber(item?.stck_prpr);
 				case 'changePct': return parseNumber(item?.prdy_ctrt);
 				case 'rsi14': return Number.isFinite(Number(m?.rsi14)) ? Number(m.rsi14) : null;
 				case 'sidewaysScore': return Number.isFinite(Number(s?.score)) ? Number(s.score) : null;
-					case 'disparity5Pct': return Number.isFinite(Number(m?.disparity5Pct)) ? Number(m.disparity5Pct) : null;
+				case 'disparity5Pct': return Number.isFinite(Number(m?.disparity5Pct)) ? Number(m.disparity5Pct) : null;
 				case 'frgn_net_qty': return parseNumber(f?.frgn_net_qty);
 				case 'loan_balance_amount': return parseNumber(t?.loan_balance_amount);
 				case 'current_per': return Number.isFinite(Number(t?.current_per)) ? Number(t.current_per) : null;
@@ -2040,7 +2044,7 @@
 		function sortItems(items) {
 			const dirMul = sortDir === 'asc' ? 1 : -1;
 			const arr = items.map((it, idx) => ({ it, idx, v: getSortValue(it, sortKey) }));
-			const isString = sortKey === 'name' || sortKey === 'code';
+			const isString = sortKey === 'name' || sortKey === 'code' || sortKey === 'sector';
 			arr.sort((a, b) => {
 				if (isString) {
 					const av = String(a.v ?? '');
@@ -2086,7 +2090,7 @@
 
 		function resetEnrichmentQueuesAndBackground() {
 			cancelBackgroundEnrichment();
-				// targets는 시장 전환 중 워커 레이스를 피하기 위해 epoch를 증가시켜
+				// targets는 시장/필터 전환 중 워커 레이스를 피하기 위해 epoch를 증가시켜
 				// 이전 워커의 결과/재기동이 새 상태를 오염시키지 않게 합니다.
 				targetsEpoch += 1;
 			targetsQueue.clear();
@@ -2176,29 +2180,30 @@
 				const checkedAttr = selectedCodes.has(code) ? 'checked' : '';
 				const priceNum = parseNumber(it?.stck_prpr);
 				const price = formatWon(it?.stck_prpr);
+				const sectorText = String(it?.sector ?? '').trim() || getItemSectorLabels(it).join(', ') || '-';
 				const changePctNum = parseNumber(it?.prdy_ctrt);
 				const changePctText = Number.isFinite(changePctNum) ? formatPct(changePctNum, 2) : '-';
-							const cls = Number.isFinite(changePctNum) ? (changePctNum > 0 ? 'up' : (changePctNum < 0 ? 'down' : '')) : '';
-							const m = maSignalsByCode.get(code) || null;
-						const rsiNum = Number.isFinite(Number(m?.rsi14)) ? Number(m.rsi14) : null;
-						const rsiText = Number.isFinite(rsiNum) ? formatRsi(rsiNum, 2) : '-';
-						const s = sidewaysByCode.get(code) || null;
-						const sidewaysScoreNum = Number.isFinite(Number(s?.score)) ? Number(s.score) : null;
-						const sidewaysLabel = String(s?.label ?? '').trim();
-						const sidewaysText = Number.isFinite(sidewaysScoreNum)
-							? `${sidewaysLabel || '횡보'} ${Math.round(sidewaysScoreNum)}점`
-							: '-';
-							const disparityNum = Number.isFinite(Number(m?.disparity5Pct)) ? Number(m.disparity5Pct) : null;
-							const disparityText = Number.isFinite(disparityNum) ? formatPct(disparityNum, 1) : '-';
-							const disparitySignal = String(m?.disparitySignal ?? '').trim();
-							const disparityLabel = (disparitySignal === '과매수' || disparitySignal === '과매도') ? ` ${disparitySignal}` : '';
-							const disparityCls = disparitySignal === '과매수' ? 'up' : (disparitySignal === '과매도' ? 'down' : '');
+				const cls = Number.isFinite(changePctNum) ? (changePctNum > 0 ? 'up' : (changePctNum < 0 ? 'down' : '')) : '';
+				const m = maSignalsByCode.get(code) || null;
+				const rsiNum = Number.isFinite(Number(m?.rsi14)) ? Number(m.rsi14) : null;
+				const rsiText = Number.isFinite(rsiNum) ? formatRsi(rsiNum, 2) : '-';
+				const s = sidewaysByCode.get(code) || null;
+				const sidewaysScoreNum = Number.isFinite(Number(s?.score)) ? Number(s.score) : null;
+				const sidewaysLabel = String(s?.label ?? '').trim();
+				const sidewaysText = Number.isFinite(sidewaysScoreNum)
+					? `${sidewaysLabel || '횡보'} ${Math.round(sidewaysScoreNum)}점`
+					: '-';
+				const disparityNum = Number.isFinite(Number(m?.disparity5Pct)) ? Number(m.disparity5Pct) : null;
+				const disparityText = Number.isFinite(disparityNum) ? formatPct(disparityNum, 1) : '-';
+				const disparitySignal = String(m?.disparitySignal ?? '').trim();
+				const disparityLabel = (disparitySignal === '과매수' || disparitySignal === '과매도') ? ` ${disparitySignal}` : '';
+				const disparityCls = disparitySignal === '과매수' ? 'up' : (disparitySignal === '과매도' ? 'down' : '');
 				const f = foreignFlowByCode.get(code) || null;
 				const flowNum = parseNumber(f?.frgn_net_qty);
 				const flowText = Number.isFinite(flowNum) ? formatSignedInt(flowNum) : '-';
 				const flowCls = Number.isFinite(flowNum) ? (flowNum > 0 ? 'up' : (flowNum < 0 ? 'down' : '')) : '';
 				const t = targetsByCode.get(code) || null;
-					const loanBalanceText = formatEok(t?.loan_balance_amount);
+				const loanBalanceText = formatEok(t?.loan_balance_amount);
 				const kbTpNum = parseNumber(t?.kb_tp);
 				const brokerTargets = [kbTpNum].filter(Number.isFinite);
 				const priceBelowTarget = Number.isFinite(priceNum)
@@ -2219,6 +2224,7 @@
 							</label>
 						</td>
 						<td class="code">${escapeHtml(code)}</td>
+						<td class="sectorCell">${escapeHtml(sectorText)}</td>
 						<td class="right ${priceBelowTarget ? 'up' : ''}">${escapeHtml(price)}</td>
 						<td class="right ${cls}">${escapeHtml(changePctText)}</td>
 						<td class="right">${escapeHtml(rsiText)}</td>
@@ -2414,8 +2420,7 @@
 		}
 
 		async function fetchDecliners() {
-			const sectorQ = SECTOR_FILTER ? `&includeSector=1` : '';
-			const url = `/api/range-stocks?minPct=${encodeURIComponent(MIN_PCT)}&maxPct=${encodeURIComponent(MAX_PCT)}&limit=${encodeURIComponent(FETCH_LIMIT)}&market=${encodeURIComponent(MARKET_FILTER)}${sectorQ}`;
+			const url = `/api/range-stocks?minPct=${encodeURIComponent(MIN_PCT)}&maxPct=${encodeURIComponent(MAX_PCT)}&limit=${encodeURIComponent(FETCH_LIMIT)}&market=${encodeURIComponent(MARKET_FILTER)}&includeSector=1`;
 			const r = await fetch(url);
 			const j = await r.json().catch(() => ({}));
 			if (!r.ok || j?.error) throw new Error(j?.error || `HTTP ${r.status}`);
@@ -3511,7 +3516,7 @@
 			});
 		}
 
-		function getTradingValueContextText() {
+		function getTradingContextText() {
 			return `시장: ${getMarketFilterLabelKor()}`;
 		}
 
@@ -3535,14 +3540,7 @@
 			return Array.isArray(j.items) ? j.items : [];
 		}
 
-		function getTradingContextText() {
-			const parts = [`시장: ${getMarketFilterLabelKor()}`];
-			if (SECTOR_FILTER && SECTOR_DEFS[SECTOR_FILTER]?.label) parts.push(`섹터: ${SECTOR_DEFS[SECTOR_FILTER].label}`);
-			if (basketActive) parts.push('basket 적용');
-			return parts.join(' / ');
-		}
-
-		function buildTradingItemByCodeMap() {
+		function getTradingItemByCodeMap() {
 			const map = new Map();
 			for (const it of getTradingUniverseItems()) {
 				const code = String(it?.code ?? '').trim().padStart(6, '0');
@@ -3609,10 +3607,9 @@
 					<tr data-code="${escapeHtml(row.code)}">
 						<td>${escapeHtml(row.name)}</td>
 						<td class="code">${escapeHtml(row.code)}</td>
+						<td class="sectorCell">${escapeHtml(row.sectorText)}</td>
+						<td class="right">${escapeHtml(formatEok(row.tradingValueNum))}</td>
 						<td class="right">${escapeHtml(formatWon(row.priceNum))}</td>
-						<td class="right">${escapeHtml(formatWon(row.oneYearHigh))}</td>
-						<td class="right">${escapeHtml(formatYmdCompact(row.highestDate))}</td>
-						<td class="right down">${escapeHtml(formatPct(row.dropPct, 2))}</td>
 						<td class="right ${changeCls}">${escapeHtml(Number.isFinite(row.changePctNum) ? formatPct(row.changePctNum, 2) : '-')}</td>
 					</tr>
 				`;
@@ -3622,8 +3619,8 @@
 			contentEl.innerHTML = [
 				'<div class="favoritesTableWrap">',
 				'<table class="stockTable favoritesStockTable">',
-				'<colgroup><col /><col style="width:110px" /><col style="width:130px" /><col style="width:130px" /><col style="width:110px" /><col style="width:130px" /><col style="width:110px" /></colgroup>',
-				'<thead><tr><th scope="col">종목</th><th scope="col">코드</th><th scope="col" class="right">현재가</th><th scope="col" class="right">1년 고점</th><th scope="col" class="right">고점일</th><th scope="col" class="right">고점대비 하락률</th><th scope="col" class="right">등락률</th></tr></thead>',
+				'<colgroup><col /><col style="width:110px" /><col style="width:180px" /><col style="width:140px" /><col style="width:120px" /><col style="width:100px" /></colgroup>',
+				`<thead><tr><th scope="col" class="sortable" data-sort-key="name">${escapeHtml(getTradingValueSortHeaderLabel('종목', 'name'))}</th><th scope="col" class="sortable" data-sort-key="code">${escapeHtml(getTradingValueSortHeaderLabel('코드', 'code'))}</th><th scope="col" class="sortable" data-sort-key="sectorText">${escapeHtml(getTradingValueSortHeaderLabel('섹터', 'sectorText'))}</th><th scope="col" class="sortable right" data-sort-key="tradingValueNum">${escapeHtml(getTradingValueSortHeaderLabel('거래대금', 'tradingValueNum'))}</th><th scope="col" class="sortable right" data-sort-key="priceNum">${escapeHtml(getTradingValueSortHeaderLabel('현재가', 'priceNum'))}</th><th scope="col" class="sortable right" data-sort-key="changePctNum">${escapeHtml(getTradingValueSortHeaderLabel('등락률', 'changePctNum'))}</th></tr></thead>`,
 				'<tbody>',
 				rowsHtml,
 				'</tbody></table></div>',
@@ -3709,6 +3706,7 @@
 						<td>${escapeHtml(row.name)}</td>
 						<td class="code">${escapeHtml(row.code)}</td>
 						<td class="sectorCell">${escapeHtml(row.sectorText)}</td>
+						<td class="right">${escapeHtml(Number.isFinite(row.aboveMa20Pct) ? formatPct(row.aboveMa20Pct, 2) : '-')}</td>
 						<td class="right">${escapeHtml(formatEok(row.tradingValueNum))}</td>
 						<td class="right">${escapeHtml(formatWon(row.priceNum))}</td>
 						<td class="right ${changeCls}">${escapeHtml(Number.isFinite(row.changePctNum) ? formatPct(row.changePctNum, 2) : '-')}</td>
@@ -3812,7 +3810,7 @@
 			contentEl.innerHTML = [
 				'<div class="favoritesTableWrap">',
 				'<table class="stockTable favoritesStockTable">',
-				'<colgroup><col /><col style="width:110px" /><col style="width:180px" /><col style="width:130px" /><col style="width:140px" /><col style="width:120px" /><col style="width:100px" /></colgroup>',
+				'<colgroup><col /><col style="width:110px" /><col style="width:180px" /><col style="width:140px" /><col style="width:120px" /><col style="width:100px" /></colgroup>',
 				`<thead><tr><th scope="col" class="sortable" data-sort-key="name">${escapeHtml(getMa20WeeklyLowerShadowSortHeaderLabel('종목', 'name'))}</th><th scope="col" class="sortable" data-sort-key="code">${escapeHtml(getMa20WeeklyLowerShadowSortHeaderLabel('코드', 'code'))}</th><th scope="col" class="sortable" data-sort-key="sectorText">${escapeHtml(getMa20WeeklyLowerShadowSortHeaderLabel('섹터', 'sectorText'))}</th><th scope="col" class="sortable right" data-sort-key="aboveMa20Pct">${escapeHtml(getMa20WeeklyLowerShadowSortHeaderLabel('20일선 상위', 'aboveMa20Pct'))}</th><th scope="col" class="sortable right" data-sort-key="tradingValueNum">${escapeHtml(getMa20WeeklyLowerShadowSortHeaderLabel('거래대금', 'tradingValueNum'))}</th><th scope="col" class="sortable right" data-sort-key="priceNum">${escapeHtml(getMa20WeeklyLowerShadowSortHeaderLabel('현재가', 'priceNum'))}</th><th scope="col" class="sortable right" data-sort-key="changePctNum">${escapeHtml(getMa20WeeklyLowerShadowSortHeaderLabel('등락률', 'changePctNum'))}</th></tr></thead>`,
 				'<tbody>',
 				rowsHtml,
@@ -3951,7 +3949,6 @@
 					tradingModalScanStats.scanned += 1;
 					if (match) {
 						found.push(match);
-						tradingModalScanStats.matched = found.length;
 						tradingModalMatches = found.slice().sort((a, b) => b.dropPct - a.dropPct).slice(0, 100);
 					}
 					if (isTradingModalDisplayActive() && (match || (tradingModalScanStats.scanned % 8) === 0)) {
@@ -4288,6 +4285,7 @@
 			else favoritesPendingDeleteCodes.delete(code);
 		});
 		document.getElementById('favoritesModalContent')?.addEventListener('dblclick', (e) => {
+			if (e.button !== 0) return;
 			const tr = e.target?.closest?.('tr[data-code]');
 			if (!tr) return;
 			const code = String(tr.dataset?.code ?? '').trim().padStart(6, '0');
