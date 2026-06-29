@@ -148,6 +148,26 @@
 		.code { color: var(--muted2); font-variant-numeric: tabular-nums; }
 		.up { color: rgba(255,120,120,.95); }
 		.down { color: rgba(120,170,255,.95); }
+		.disclosureCell { text-align: center; }
+		.disclosureLink {
+			display: inline-flex;
+			align-items: center;
+			justify-content: center;
+			text-decoration: none;
+		}
+		.disclosureDot {
+			display: inline-flex;
+			width: 14px;
+			height: 14px;
+			border-radius: 999px;
+			background: #2ecb70;
+			box-shadow: 0 0 0 1px rgba(0,0,0,.18), 0 0 12px rgba(46,203,112,.35);
+			transition: transform .12s ease, filter .12s ease;
+		}
+		.disclosureLink:hover .disclosureDot {
+			transform: scale(1.08);
+			filter: brightness(1.05);
+		}
 
 		.modalOverlay {
 			position: fixed;
@@ -500,6 +520,7 @@
 						<tr>
 							<th class="sortable" data-sort-key="name">종목</th>
 							<th class="sortable" data-sort-key="code">코드</th>
+							<th class="sortable" data-sort-key="disclosure">공시</th>
 							<th class="sortable" data-sort-key="sector">섹터</th>
 							<th class="sortable right" data-sort-key="price">현재가</th>
 							<th class="sortable right" data-sort-key="changePct">등락률</th>
@@ -929,6 +950,9 @@
 		const targetsQueue = new Set();
 		const targetsNextFetchAtMs = new Map();
 		const targetsRetryCountByCode = new Map();
+		const disclosuresByCode = new Map();
+		const disclosuresQueue = new Set();
+		let disclosuresWorkerPromise = null;
 			// targets(PER/목표가/증권사 목표가) 워커는 시장/필터 전환 중 큐가 reset되면서
 			// "워커가 종료되었는데 새 큐를 처리하지 않는" 레이스가 날 수 있습니다.
 			// epoch(세대)로 워커 결과/재기동을 안전하게 가드합니다.
@@ -967,6 +991,16 @@
 				}
 			});
 			return foreignFlowWorkerPromise;
+		}
+		function startDisclosuresWorkerIfNeeded() {
+			if (disclosuresWorkerPromise) return disclosuresWorkerPromise;
+			disclosuresWorkerPromise = runDisclosuresWorker().finally(() => {
+				disclosuresWorkerPromise = null;
+				if (disclosuresQueue.size > 0) {
+					setTimeout(() => { startDisclosuresWorkerIfNeeded(); }, 0);
+				}
+			});
+			return disclosuresWorkerPromise;
 		}
 		const maSignalsByCode = new Map();
 		const maSignalsQueue = new Set();
@@ -1029,7 +1063,6 @@
 		let sectorModalOpen = false;
 		function isModalDisplayActive(overlayId, isOpen) {
 			if (!isOpen) return false;
-			if (document.visibilityState !== 'visible') return false;
 			const overlay = document.getElementById(overlayId);
 			if (!overlay) return false;
 			if (!overlay.classList.contains('open')) return false;
@@ -1094,6 +1127,7 @@
 			if (document.visibilityState !== 'visible') return;
 			if (isFavoritesModalDisplayActive()) refreshFavoritesModalVisibleData({ force: true }).catch(() => {});
 			if (isTradingModalDisplayActive()) refreshTradingCandidates().catch(() => {});
+			if (isTradingValueModalDisplayActive()) refreshTradingValueCandidates().catch(() => {});
 			if (isMa20WeeklyLowerShadowModalDisplayActive()) refreshMa20WeeklyLowerShadowCandidates().catch(() => {});
 			if (isUsCpiModalDisplayActive()) openUsCpiModal().catch(() => {});
 			if (isUsRateModalDisplayActive()) openUsRateModal().catch(() => {});
@@ -1124,11 +1158,29 @@
 		let tradingValueSortKey = 'tradingValueNum';
 		let tradingValueSortDir = 'desc';
 		let tradingValueModalScrollState = { modalBodyTop: 0, tableWrapTop: 0 };
+		let tradingValueAutoRefreshTimer = null;
+		const TRADING_VALUE_AUTO_REFRESH_INTERVAL_MS = 30_000;
 		let ma20WeeklyLowerShadowModalOpen = false;
 		let ma20WeeklyLowerShadowModalLoading = false;
 		let ma20WeeklyLowerShadowItems = [];
 		let ma20WeeklyLowerShadowSortKey = 'aboveMa20Pct';
 		let ma20WeeklyLowerShadowSortDir = 'desc';
+
+		function stopTradingValueAutoRefresh() {
+			if (tradingValueAutoRefreshTimer) {
+				try { clearInterval(tradingValueAutoRefreshTimer); } catch {}
+				tradingValueAutoRefreshTimer = null;
+			}
+		}
+
+		function startTradingValueAutoRefresh() {
+			stopTradingValueAutoRefresh();
+			tradingValueAutoRefreshTimer = setInterval(() => {
+				if (!isTradingValueModalDisplayActive()) return;
+				if (tradingValueModalLoading) return;
+				refreshTradingValueCandidates().catch(() => {});
+			}, TRADING_VALUE_AUTO_REFRESH_INTERVAL_MS);
+		}
 
 		let SECTOR_FILTER = null; // one of sectorCard[data-sector] or null
 		const SECTOR_DEFS = {
@@ -2023,9 +2075,11 @@
 			const f = foreignFlowByCode.get(code) || null;
 			const m = maSignalsByCode.get(code) || null;
 			const s = sidewaysByCode.get(code) || null;
+			const d = disclosuresByCode.get(code) || null;
 			switch (key) {
 				case 'name': return String(item?.name || item?.hts_kor_isnm || code || '');
 				case 'code': return code;
+				case 'disclosure': return d?.hasDisclosure ? 1 : 0;
 				case 'sector': return String(item?.sector ?? '').trim() || getItemSectorLabels(item).join(', ') || '-';
 				case 'price': return parseNumber(item?.stck_prpr);
 				case 'changePct': return parseNumber(item?.prdy_ctrt);
@@ -2097,6 +2151,7 @@
 			targetsNextFetchAtMs.clear();
 			targetsRetryCountByCode.clear();
 			foreignFlowQueue.clear();
+			disclosuresQueue.clear();
 			maSignalsQueue.clear();
 			sidewaysQueue.clear();
 		}
@@ -2113,6 +2168,7 @@
 				idx += 80;
 				loadTargetsForCodes(chunk).catch(() => {});
 				loadForeignFlowsForCodes(chunk).catch(() => {});
+				loadDisclosuresForCodes(chunk).catch(() => {});
 				loadMaSignalsForCodes(chunk).catch(() => {});
 				loadSidewaysForCodes(chunk).catch(() => {});
 				backgroundEnrichTimer = setTimeout(step, 1500);
@@ -2178,6 +2234,7 @@
 				const name = escapeHtml(it?.name || it?.hts_kor_isnm || code || '-');
 				const pickId = `pick-${code}`;
 				const checkedAttr = selectedCodes.has(code) ? 'checked' : '';
+				const disclosure = disclosuresByCode.get(code) || null;
 				const priceNum = parseNumber(it?.stck_prpr);
 				const price = formatWon(it?.stck_prpr);
 				const sectorText = String(it?.sector ?? '').trim() || getItemSectorLabels(it).join(', ') || '-';
@@ -2215,6 +2272,12 @@
 					: '-';
 				const tp = formatWon(t?.target_prc);
 				const kb = formatWon(t?.kb_tp);
+				const disclosureTitle = disclosure?.latestDisclosureTitle
+					? `${disclosure.latestDisclosureTitle}${disclosure?.latestDisclosureTime ? ` (${disclosure.latestDisclosureTime})` : ''}`
+					: '금일 공시 없음';
+				const disclosureHtml = disclosure?.hasDisclosure && disclosure?.latestDisclosureUrl
+					? `<a class="disclosureLink" href="${escapeHtml(disclosure.latestDisclosureUrl)}" target="_blank" rel="noopener noreferrer" title="${escapeHtml(disclosureTitle)}" aria-label="${escapeHtml(name)} 공시 열기"><span class="disclosureDot"></span></a>`
+					: '-';
 				return `
 					<tr data-code="${escapeHtml(code)}">
 						<td>
@@ -2224,6 +2287,7 @@
 							</label>
 						</td>
 						<td class="code">${escapeHtml(code)}</td>
+						<td class="disclosureCell">${disclosureHtml}</td>
 						<td class="sectorCell">${escapeHtml(sectorText)}</td>
 						<td class="right ${priceBelowTarget ? 'up' : ''}">${escapeHtml(price)}</td>
 						<td class="right ${cls}">${escapeHtml(changePctText)}</td>
@@ -2417,6 +2481,61 @@
 		async function loadForeignFlowsForCodes(codes) {
 			enqueueForeignFlowCodes(codes);
 			return startForeignFlowWorkerIfNeeded();
+		}
+
+		function enqueueDisclosureCodes(codes) {
+			for (const c of (codes || [])) {
+				const code = String(c ?? '').trim().padStart(6, '0');
+				if (/^[0-9]{6}$/.test(code)) disclosuresQueue.add(code);
+			}
+		}
+
+		async function runDisclosuresWorker() {
+			const TTL_MS = 60_000;
+			while (disclosuresQueue.size > 0) {
+				const now = Date.now();
+				const batch = Array.from(disclosuresQueue).slice(0, 200);
+				for (const c of batch) disclosuresQueue.delete(c);
+				const needed = batch.filter((c) => {
+					const entry = disclosuresByCode.get(c);
+					if (!entry) return true;
+					return (now - (entry.fetchedAtMs || 0)) > TTL_MS;
+				});
+				if (needed.length === 0) continue;
+				const url = `/api/today-disclosures?codes=${encodeURIComponent(needed.join(','))}&ttlMs=${encodeURIComponent(TTL_MS)}`;
+				const r = await fetch(url, { cache: 'no-store' });
+				const j = await r.json().catch(() => ({}));
+				if (!r.ok || j?.error) continue;
+				const items = Array.isArray(j.items) ? j.items : [];
+				let changed = false;
+				for (const it of items) {
+					const code = String(it?.code ?? '').padStart(6, '0');
+					if (!/^[0-9]{6}$/.test(code)) continue;
+					const prev = disclosuresByCode.get(code);
+					const next = {
+						code,
+						hasDisclosure: !!it?.hasDisclosure,
+						disclosureCount: Number(it?.disclosureCount ?? 0) || 0,
+						latestDisclosureUrl: String(it?.latestDisclosureUrl ?? '').trim() || null,
+						latestDisclosureTitle: String(it?.latestDisclosureTitle ?? '').trim() || null,
+						latestDisclosureTime: String(it?.latestDisclosureTime ?? '').trim() || null,
+						fetchedAtMs: Date.now(),
+					};
+					disclosuresByCode.set(code, next);
+					if (!prev) changed = true;
+					else {
+						const keys = ['hasDisclosure', 'disclosureCount', 'latestDisclosureUrl', 'latestDisclosureTitle', 'latestDisclosureTime'];
+						if (keys.some(k => String(prev?.[k] ?? '') !== String(next?.[k] ?? ''))) changed = true;
+					}
+				}
+				if (changed) renderTable();
+				await new Promise(r2 => setTimeout(r2, 10));
+			}
+		}
+
+		async function loadDisclosuresForCodes(codes) {
+			enqueueDisclosureCodes(codes);
+			return startDisclosuresWorkerIfNeeded();
 		}
 
 		async function fetchDecliners() {
@@ -2661,6 +2780,7 @@
 				const restCodes = pickUniqueCodesFromItems(restItems);
 				loadTargetsForCodes(visibleCodes).catch(() => {});
 				loadForeignFlowsForCodes(visibleCodes).catch(() => {});
+				loadDisclosuresForCodes(visibleCodes).catch(() => {});
 				loadMaSignalsForCodes(visibleCodes).catch(() => {});
 				loadSidewaysForCodes(visibleCodes).catch(() => {});
 				startBackgroundEnrichment(restCodes);
@@ -3735,11 +3855,13 @@
 			overlay.classList.toggle('open', tradingValueModalOpen);
 			overlay.setAttribute('aria-hidden', tradingValueModalOpen ? 'false' : 'true');
 			if (!tradingValueModalOpen) {
+				stopTradingValueAutoRefresh();
 				tradingValueModalLoading = false;
 				tradingValueModalSnapshotItems = [];
 				tradingValueModalScrollState = { modalBodyTop: 0, tableWrapTop: 0 };
 				return;
 			}
+			startTradingValueAutoRefresh();
 			tradingValueModalSnapshotItems = Array.isArray(tradingValueUniverseItems) ? tradingValueUniverseItems.slice() : [];
 			renderTradingValueModal();
 			refreshTradingValueCandidates().catch(() => {});

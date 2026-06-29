@@ -9,27 +9,23 @@ const fs      = require('fs');
 const axios   = require('axios');
 const cheerio = require('cheerio');
 const iconv = require('iconv-lite');
+const dotenv = require('dotenv');
 
-// Prevent occasional upstream hangs from stalling background refresh queues.
-// Can be overridden via env.
-const fnGuideClient = axios.create({
-  baseURL: 'https://comp.fnguide.com',
-  timeout: 20_000,
-  headers: {
-    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36',
-    'Accept-Language': 'ko-KR,ko;q=0.9,en;q=0.8',
-    Referer: 'https://comp.fnguide.com/',
-  },
-});
-axios.defaults.timeout = Math.max(1_000, Math.min(120_000, Number(process.env.HTTP_TIMEOUT_MS ?? 15_000)));
-
-require('dotenv').config({ path: path.join(__dirname, 'config.env') });
+// Load local env files for API credentials.
+dotenv.config({ path: path.join(__dirname, 'config.env') });
+dotenv.config({ path: path.join(__dirname, '.env') });
 
 const app  = express();
 const PORT = 3000;
 
 // 주가 5,000원 이하 종목은 수집/표시에서 제외
 const LOW_PRICE_CUTOFF_KRW = 5000;
+const EXCLUDED_SECURITY_NAME_PATTERNS = [
+  /(?:^|\s)(?:ETF|ETN)(?:\s|$)/i,
+  /상장지수/i,
+  /(?:^|\s)펀드(?:\s|$)/,
+  /^(?:KODEX|TIGER|KOSEF|KINDEX|KBSTAR|HANARO|ARIRANG|SOL|ACE|RISE|PLUS|TIMEFOLIO|TREX|1Q|마이티|파워|FOCUS|SMART|WOORI|TRUE|QV)(?:\s|$|\()/i,
+];
 
 // 네이버 시가총액(시장합계) 페이지는 보통 1페이지에 50개 종목이 노출됩니다.
 // 일부 환경에서 마지막 페이지(lastPage) 파싱이 과소추정되거나, 뒤쪽 페이지가 반복/빈 페이지로 들어오는 경우가 있어
@@ -64,6 +60,12 @@ function normalizeStockCode(value) {
   if (!digits) return null;
   const code = digits.padStart(6, '0').slice(-6);
   return /^[0-9]{6}$/.test(code) ? code : null;
+}
+
+function shouldExcludeSecurityByName(nameLike) {
+  const name = String(nameLike ?? '').replace(/\s+/g, ' ').trim();
+  if (!name) return false;
+  return EXCLUDED_SECURITY_NAME_PATTERNS.some((pattern) => pattern.test(name));
 }
 
 function readFavoritesFile() {
@@ -603,6 +605,22 @@ const cnnFearGreedClient = axios.create({
   },
 });
 
+const dartClient = axios.create({
+  baseURL: 'https://dart.fss.or.kr',
+  timeout: 15_000,
+  headers: {
+    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36',
+    'Accept-Language': 'ko-KR,ko;q=0.9,en;q=0.8',
+  },
+});
+
+const TODAY_DISCLOSURES_TTL_MS_DEFAULT = 60 * 1000; // 60s
+const todayDisclosuresCache = {
+  value: null,
+  expiresAtMs: 0,
+  inFlight: null,
+};
+
 function formatKstYmdHm(dateLike) {
   const d = dateLike instanceof Date ? dateLike : new Date(dateLike);
   if (!Number.isFinite(d.getTime())) return null;
@@ -625,6 +643,135 @@ function formatKstYmdHm(dateLike) {
     const hh = String(d.getHours()).padStart(2, '0');
     const mm = String(d.getMinutes()).padStart(2, '0');
     return `${y}.${m}.${day} ${hh}:${mm}`;
+  }
+}
+
+function formatKstYmdDot(dateLike = Date.now()) {
+  const d = dateLike instanceof Date ? dateLike : new Date(dateLike);
+  if (!Number.isFinite(d.getTime())) return null;
+  try {
+    const parts = new Intl.DateTimeFormat('sv-SE', {
+      timeZone: 'Asia/Seoul',
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+    }).format(d);
+    return parts.replace(/-/g, '.');
+  } catch {
+    const y = d.getFullYear();
+    const m = String(d.getMonth() + 1).padStart(2, '0');
+    const day = String(d.getDate()).padStart(2, '0');
+    return `${y}.${m}.${day}`;
+  }
+}
+
+function normalizeCorpNameForMatch(value) {
+  return String(value ?? '')
+    .trim()
+    .replace(/^주식회사\s*/u, '')
+    .replace(/\(주\)|㈜/gu, '')
+    .replace(/[·•・]/gu, '')
+    .replace(/\s+/g, '')
+    .toLowerCase();
+}
+
+function buildUniverseNameToCodeMap(items) {
+  const map = new Map();
+  for (const item of (items || [])) {
+    const code = String(item?.code ?? '').trim().padStart(6, '0');
+    const name = String(item?.name ?? '').trim();
+    if (!/^[0-9]{6}$/.test(code) || !name) continue;
+    const keys = new Set([
+      normalizeCorpNameForMatch(name),
+      normalizeCorpNameForMatch(`주식회사 ${name}`),
+    ]);
+    for (const key of keys) {
+      if (!key) continue;
+      if (!map.has(key)) map.set(key, code);
+    }
+  }
+  return map;
+}
+
+function parseTodayDisclosuresFromDartHtml(html, universeItems) {
+  const $ = cheerio.load(String(html || ''));
+  const todayYmd = formatKstYmdDot(new Date());
+  const nameToCode = buildUniverseNameToCodeMap(universeItems);
+  const byCode = new Map();
+
+  $('table.tbList tbody tr').each((_, tr) => {
+    const tds = $(tr).find('td');
+    if (!tds || tds.length < 5) return;
+
+    const timeText = String($(tds.get(0)).text() || '').replace(/\s+/g, ' ').trim();
+    const corpAnchor = $(tds.get(1)).find('a').first();
+    const corpName = String(corpAnchor.text() || $(tds.get(1)).text() || '').replace(/\s+/g, ' ').trim();
+    const reportAnchor = $(tds.get(2)).find('a').first();
+    const reportName = String(reportAnchor.text() || $(tds.get(2)).text() || '').replace(/\s+/g, ' ').trim();
+    const dateText = String($(tds.get(4)).text() || '').replace(/\s+/g, ' ').trim();
+    const href = String(reportAnchor.attr('href') || '').trim();
+
+    if (!corpName || !reportName || !href) return;
+    if (dateText !== todayYmd) return;
+
+    const code = nameToCode.get(normalizeCorpNameForMatch(corpName));
+    if (!code) return;
+
+    const absoluteUrl = new URL(href, 'https://dart.fss.or.kr').toString();
+    const disclosure = {
+      code,
+      corpName,
+      reportName,
+      time: timeText || null,
+      date: dateText,
+      url: absoluteUrl,
+    };
+
+    if (!byCode.has(code)) byCode.set(code, []);
+    byCode.get(code).push(disclosure);
+  });
+
+  const items = Array.from(byCode.entries()).map(([code, disclosures]) => ({
+    code,
+    hasDisclosure: disclosures.length > 0,
+    disclosureCount: disclosures.length,
+    latestDisclosureUrl: disclosures[0]?.url ?? null,
+    latestDisclosureTitle: disclosures[0]?.reportName ?? null,
+    latestDisclosureTime: disclosures[0]?.time ?? null,
+    corpName: disclosures[0]?.corpName ?? null,
+    disclosures,
+  }));
+
+  return {
+    date: todayYmd,
+    count: items.length,
+    items,
+    sourceUrl: 'https://dart.fss.or.kr/dsac001/mainAll.do',
+    updatedAt: new Date().toISOString(),
+  };
+}
+
+async function getTodayDisclosuresCached(ttlMsLike) {
+  const ttlMs = Math.max(10_000, Math.min(10 * 60 * 1000, Number(ttlMsLike ?? TODAY_DISCLOSURES_TTL_MS_DEFAULT)));
+  const now = Date.now();
+  if (todayDisclosuresCache.value && now < todayDisclosuresCache.expiresAtMs) return todayDisclosuresCache.value;
+  if (todayDisclosuresCache.inFlight) return todayDisclosuresCache.inFlight;
+
+  const inFlight = (async () => {
+    const universe = await getResolveStockUniverseCached(clampUniverseTtlMs(RESOLVE_STOCK_UNIVERSE_TTL_MS_DEFAULT));
+    const response = await dartClient.get('/dsac001/mainAll.do', { responseType: 'text' });
+    const payload = parseTodayDisclosuresFromDartHtml(response.data, universe?.items || []);
+    todayDisclosuresCache.value = payload;
+    todayDisclosuresCache.expiresAtMs = Date.now() + ttlMs;
+    todayDisclosuresCache.inFlight = null;
+    return payload;
+  })();
+
+  todayDisclosuresCache.inFlight = inFlight;
+  try {
+    return await inFlight;
+  } finally {
+    if (todayDisclosuresCache.inFlight === inFlight) todayDisclosuresCache.inFlight = null;
   }
 }
 
@@ -2500,6 +2647,7 @@ function parseNaverMarketSumItemsFromHtml(html) {
     const codeMatch = href.match(/(?:\?|&)code=(\d{4,8})/);
     const code = codeMatch ? String(codeMatch[1]).padStart(6, '0') : null;
     if (!code || !name) return;
+    if (shouldExcludeSecurityByName(name)) return;
     // 네이버 일부 페이지/환경에서 code=000000 같은 placeholder가 섞이는 경우가 있어 차단
     if (code === '000000') return;
 
@@ -5503,7 +5651,9 @@ app.get('/api/trading-value-stocks', async (req, res) => {
     const deduped = new Map();
     for (const item of allRaw) {
       const code = String(item?.mksc_shrn_iscd ?? item?.stck_shrn_iscd ?? item?.code ?? '').trim().padStart(6, '0');
+      const name = item?.hts_kor_isnm ?? item?.stck_name ?? item?.isnm ?? item?.name ?? code;
       if (!/^[0-9]{6}$/.test(code)) continue;
+      if (shouldExcludeSecurityByName(name)) continue;
       if (allowedCodes && !allowedCodes.has(code)) continue;
       if (deduped.has(code)) continue;
 
@@ -5513,7 +5663,7 @@ app.get('/api/trading-value-stocks', async (req, res) => {
 
       deduped.set(code, {
         code,
-        name: item?.hts_kor_isnm ?? item?.stck_name ?? item?.isnm ?? item?.name ?? code,
+        name,
         stck_prpr: item?.stck_prpr ?? null,
         prdy_vrss: item?.prdy_vrss ?? null,
         prdy_ctrt: Number.isFinite(pctNum) ? String(pctNum) : (item?.prdy_ctrt ?? null),
@@ -6092,6 +6242,60 @@ app.get('/api/op-profits', async (req, res) => {
   }
 });
 
+// ── 금일 공시(DART 최근공시) ───────────────────────────
+// GET /api/today-disclosures?codes=005930,000660
+app.get('/api/today-disclosures', async (req, res) => {
+  const raw = String(req.query.codes ?? '').trim();
+  if (!raw) return res.status(400).json({ error: 'codes 파라미터가 필요합니다.' });
+
+  const codes = Array.from(
+    new Set(
+      raw
+        .split(/[,\s]+/)
+        .map(s => String(s || '').trim().padStart(6, '0'))
+        .filter(s => /^[0-9]{6}$/.test(s))
+    )
+  );
+  if (codes.length === 0) return res.status(400).json({ error: '유효한 codes가 없습니다.' });
+  if (codes.length > 300) return res.status(400).json({ error: 'codes는 한 번에 최대 300개까지 가능합니다.' });
+
+  try {
+    const ttlMs = Math.max(10_000, Math.min(10 * 60 * 1000, Number(req.query.ttlMs ?? TODAY_DISCLOSURES_TTL_MS_DEFAULT)));
+    const payload = await getTodayDisclosuresCached(ttlMs);
+    const disclosureByCode = new Map((payload?.items || []).map(item => [String(item?.code ?? '').padStart(6, '0'), item]));
+    const items = codes.map((code) => {
+      const found = disclosureByCode.get(code) || null;
+      return found || {
+        code,
+        hasDisclosure: false,
+        disclosureCount: 0,
+        latestDisclosureUrl: null,
+        latestDisclosureTitle: null,
+        latestDisclosureTime: null,
+        corpName: null,
+        disclosures: [],
+      };
+    });
+
+    return res.json({
+      date: payload?.date ?? formatKstYmdDot(new Date()),
+      count: items.filter(item => item.hasDisclosure).length,
+      items,
+      sourceUrl: payload?.sourceUrl ?? 'https://dart.fss.or.kr/dsac001/mainAll.do',
+      updatedAt: payload?.updatedAt ?? new Date().toISOString(),
+    });
+  } catch (e) {
+    const diagnostic = {
+      message: e.message,
+      code: e.code,
+      status: e.response?.status,
+      data: e.response?.data,
+    };
+    console.error('금일 공시 조회 실패:', diagnostic);
+    return res.status(500).json({ error: '금일 공시 조회 실패', details: diagnostic });
+  }
+});
+
 // ── 외국인 매수/매도(일별) ────────────────────────────
 // GET /api/foreign-flows?codes=005930,000660&date=20250812
 // - date(YYYYMMDD) 미지정 시 한국시간 오늘
@@ -6553,16 +6757,63 @@ app.get('/api/fear-greed', async (req, res) => {
   }
 });
 
-// ── 전일대비 하락률 상위(필터링) ───────────────────────
-// 브라우저 → /api/decliners?minDropPct=5&limit=30&market=J
-// - minDropPct: 5  => 전일대비 -5% 이하만
-// - limit: 최대 반환 개수
-// - market: J(코스피) / Q(코스닥) 등
-app.get('/api/decliners', async (req, res) => {
-  const limit = Math.max(1, Math.min(300, Number(req.query.limit ?? 30)));
-  const minDropPct = Math.max(0, Number(req.query.minDropPct ?? 5));
-  const market = String(req.query.market ?? 'J');
+let tradeAmountTimer = null;
+let isLoadingTradeAmount = false;
 
+async function loadTradeAmount() {
+  if (isLoadingTradeAmount) return;
+  isLoadingTradeAmount = true;
+  try {
+    const res = await fetch(`/api/trade-amount?ts=${Date.now()}`, {
+      cache: 'no-store',
+    });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const data = await res.json();
+    renderTradeAmount(data); // 기존 렌더 함수 사용
+  } catch (e) {
+    console.error('거래대금 갱신 실패:', e);
+  } finally {
+    isLoadingTradeAmount = false;
+  }
+}
+
+function openTradeAmountPopup() {
+  showTradeAmountPopup();      // 기존 열기 로직
+  loadTradeAmount();           // 열릴 때 즉시 1회
+  clearInterval(tradeAmountTimer);
+  tradeAmountTimer = setInterval(loadTradeAmount, 5000); // 5초마다 갱신
+}
+
+function closeTradeAmountPopup() {
+  hideTradeAmountPopup();      // 기존 닫기 로직
+  clearInterval(tradeAmountTimer);
+  tradeAmountTimer = null;
+}
+
+// ── 거래대금 조회(캐시 방지) ───────────────────────────
+app.get('/api/trade-amount', async (req, res) => {
+  res.set('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
+  res.set('Pragma', 'no-cache');
+  res.set('Expires', '0');
+
+  if (typeof getTradeAmount !== 'function') {
+    return res.status(501).json({ error: 'getTradeAmount 함수가 구현되지 않았습니다.' });
+  }
+
+  try {
+    const data = await getTradeAmount(); // 기존 데이터 조회 함수
+    return res.json(data);
+  } catch (e) {
+    return res.status(500).json({ error: '거래대금 조회 실패', details: e.message });
+  }
+});
+
+// ── 하락률 랭킹 조회(캐시 포함) ───────────────────────────
+app.get('/api/decliners', async (req, res) => {
+  const marketRaw = String(req.query.market ?? 'all').toLowerCase();
+  const market = ['kospi', 'kosdaq', 'all'].includes(marketRaw) ? marketRaw : 'all';
+  const minDropPct = Math.max(0, Number(req.query.minDropPct ?? 1));
+  const limit = Math.max(1, Math.min(2000, Number(req.query.limit ?? 300)));
   const minPctRaw = req.query.minPct;
   const maxPctRaw = req.query.maxPct;
   const minPct = minPctRaw === undefined ? null : Number(minPctRaw);
@@ -6763,6 +7014,9 @@ app.get('/api/decliners', async (req, res) => {
         .map(item => {
           const pctStr = item.prdy_ctrt ?? item.prdy_ctrt_rate ?? item.fluc_rt ?? item.rate ?? item.rt;
           let pct = Number(pctStr);
+          const name = item.hts_kor_isnm ?? item.stck_name ?? item.isnm ?? item.name;
+
+          if (shouldExcludeSecurityByName(name)) return null;
 
           // 일부 KIS 응답은 등락률이 절대값으로 오고, 별도 sign 필드로 방향을 알려줍니다.
           // pctStr에 부호가 이미 포함되어 있으면 그대로 사용하고, 아니면 sign에 맞춰 부호를 보정합니다.
@@ -6792,7 +7046,7 @@ app.get('/api/decliners', async (req, res) => {
           if (Number.isFinite(currentPrice) && currentPrice <= LOW_PRICE_CUTOFF_KRW) return null;
 
           return {
-            name: item.hts_kor_isnm ?? item.stck_name ?? item.isnm ?? item.name,
+            name,
             code: item.stck_shrn_iscd ?? item.mksc_shrn_iscd ?? item.code,
             stck_prpr: item.stck_prpr,
             prdy_vrss: item.prdy_vrss,
