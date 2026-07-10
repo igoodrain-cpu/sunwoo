@@ -508,6 +508,10 @@
 					<span class="muted">금일반대매매</span>
 					<span id="forcedSellingText">-</span>
 				</div>
+				<div class="segment">
+					<span class="muted">VKOSPI</span>
+					<span id="vkospiText">-</span>
+				</div>
 			</div>
 		</div>
 	</div>
@@ -3372,6 +3376,46 @@
 			}
 		}
 
+		function normalizeVkospiDisplayValue(value) {
+			const num = Number(value);
+			if (!Number.isFinite(num)) return null;
+			if (Math.abs(num) >= 1000 && Math.abs(num) < 100000) return num / 100;
+			return num;
+		}
+
+		function classifyVkospiValue(value) {
+			const num = Number(value);
+			if (!Number.isFinite(num)) return { label: null, direction: 'flat' };
+			if (num < 10) return { label: '매우 안정 구간', direction: 'down' };
+			if (num < 20) return { label: '정상/안정 구간', direction: 'down' };
+			if (num < 30) return { label: '주의 구간', direction: 'flat' };
+			if (num < 40) return { label: '경고 구간', direction: 'up' };
+			if (num < 50) return { label: '위험 구간', direction: 'up' };
+			if (num < 60) return { label: '시스템 리스크 전조', direction: 'up' };
+			if (num < 70) return { label: '심각 경계 구간', direction: 'up' };
+			if (num < 80) return { label: '통제 불능 패닉 구간', direction: 'up' };
+			return { label: '극단적 패닉 구간', direction: 'up' };
+		}
+
+		async function updateVkospi() {
+			const el = document.getElementById('vkospiText');
+			if (!el) return;
+			try {
+				const r = await fetch(withSidcode('/api/vkospi'), { cache: 'no-store' });
+				const j = await r.json().catch(() => ({}));
+				if (!r.ok || j?.error) throw new Error(j?.error || `HTTP ${r.status}`);
+				const displayValue = normalizeVkospiDisplayValue(j.value);
+				if (!Number.isFinite(displayValue)) throw new Error('value 파싱 실패');
+				const cls = classifyVkospiValue(displayValue);
+				const valueText = displayValue.toLocaleString('ko-KR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+				el.textContent = cls.label ? `${valueText} (${cls.label})` : valueText;
+				setDirectionClass(el, cls.direction);
+			} catch {
+				el.textContent = '-';
+				setDirectionClass(el, 'flat');
+			}
+		}
+
 		function formatSigned(n, digits = 2) {
 			const num = Number(n);
 			if (!Number.isFinite(num)) return null;
@@ -3640,6 +3684,10 @@
 			return `시장: ${getMarketFilterLabelKor()}`;
 		}
 
+		function getTradingValueContextText() {
+			return `시장: ${getMarketFilterLabelKor()}`;
+		}
+
 		function getMa20WeeklyLowerShadowContextText() {
 			return `시장: ${getMarketFilterLabelKor()}`;
 		}
@@ -3684,7 +3732,7 @@
 			const contentEl = document.getElementById('tradingModalContent');
 			if (!contentEl) return;
 
-			const itemByCode = buildTradingItemByCodeMap();
+			const itemByCode = getTradingItemByCodeMap();
 			const rows = tradingModalMatches.map((entry) => {
 				const live = itemByCode.get(entry.code) || null;
 				const priceNum = parseNumber(live?.stck_prpr);
@@ -3695,6 +3743,7 @@
 				return {
 					code: entry.code,
 					name: String(live?.name || live?.hts_kor_isnm || entry?.name || entry.code),
+					sectorText: String(live?.sector ?? '').trim() || getItemSectorLabels(live).join(', ') || '-',
 					priceNum,
 					oneYearHigh: entry.oneYearHigh,
 					highestDate: entry.highestDate,
@@ -3728,7 +3777,9 @@
 						<td>${escapeHtml(row.name)}</td>
 						<td class="code">${escapeHtml(row.code)}</td>
 						<td class="sectorCell">${escapeHtml(row.sectorText)}</td>
-						<td class="right">${escapeHtml(formatEok(row.tradingValueNum))}</td>
+						<td class="right">${escapeHtml(formatWon(row.oneYearHigh))}</td>
+						<td class="right">${escapeHtml(formatYmdCompact(row.highestDate))}</td>
+						<td class="right down">${escapeHtml(formatPct(row.dropPct, 2))}</td>
 						<td class="right">${escapeHtml(formatWon(row.priceNum))}</td>
 						<td class="right ${changeCls}">${escapeHtml(Number.isFinite(row.changePctNum) ? formatPct(row.changePctNum, 2) : '-')}</td>
 					</tr>
@@ -3739,8 +3790,8 @@
 			contentEl.innerHTML = [
 				'<div class="favoritesTableWrap">',
 				'<table class="stockTable favoritesStockTable">',
-				'<colgroup><col /><col style="width:110px" /><col style="width:180px" /><col style="width:140px" /><col style="width:120px" /><col style="width:100px" /></colgroup>',
-				`<thead><tr><th scope="col" class="sortable" data-sort-key="name">${escapeHtml(getTradingValueSortHeaderLabel('종목', 'name'))}</th><th scope="col" class="sortable" data-sort-key="code">${escapeHtml(getTradingValueSortHeaderLabel('코드', 'code'))}</th><th scope="col" class="sortable" data-sort-key="sectorText">${escapeHtml(getTradingValueSortHeaderLabel('섹터', 'sectorText'))}</th><th scope="col" class="sortable right" data-sort-key="tradingValueNum">${escapeHtml(getTradingValueSortHeaderLabel('거래대금', 'tradingValueNum'))}</th><th scope="col" class="sortable right" data-sort-key="priceNum">${escapeHtml(getTradingValueSortHeaderLabel('현재가', 'priceNum'))}</th><th scope="col" class="sortable right" data-sort-key="changePctNum">${escapeHtml(getTradingValueSortHeaderLabel('등락률', 'changePctNum'))}</th></tr></thead>`,
+				'<colgroup><col /><col style="width:110px" /><col style="width:160px" /><col style="width:130px" /><col style="width:110px" /><col style="width:110px" /><col style="width:120px" /><col style="width:100px" /></colgroup>',
+				'<thead><tr><th scope="col">종목</th><th scope="col">코드</th><th scope="col">섹터</th><th scope="col" class="right">1년고점</th><th scope="col" class="right">고점일</th><th scope="col" class="right">고점대비</th><th scope="col" class="right">현재가</th><th scope="col" class="right">등락률</th></tr></thead>',
 				'<tbody>',
 				rowsHtml,
 				'</tbody></table></div>',
@@ -3826,7 +3877,6 @@
 						<td>${escapeHtml(row.name)}</td>
 						<td class="code">${escapeHtml(row.code)}</td>
 						<td class="sectorCell">${escapeHtml(row.sectorText)}</td>
-						<td class="right">${escapeHtml(Number.isFinite(row.aboveMa20Pct) ? formatPct(row.aboveMa20Pct, 2) : '-')}</td>
 						<td class="right">${escapeHtml(formatEok(row.tradingValueNum))}</td>
 						<td class="right">${escapeHtml(formatWon(row.priceNum))}</td>
 						<td class="right ${changeCls}">${escapeHtml(Number.isFinite(row.changePctNum) ? formatPct(row.changePctNum, 2) : '-')}</td>
@@ -4556,6 +4606,7 @@
 		observeStockScreenVisibility();
 		updateMarketDeposit();
 		updateForcedSellingAmount();
+		updateVkospi();
 		updateOilWti();
 		updateUsFuturesNq();
 		updateUsFuturesEs();
@@ -4569,6 +4620,7 @@
 		});
 		setInterval(updateMarketDeposit, 60_000);
 		setInterval(updateForcedSellingAmount, 60_000);
+		setInterval(updateVkospi, 60_000);
 		setInterval(updateOilWti, 60_000);
 		setInterval(updateUsFuturesNq, 60_000);
 		setInterval(updateUsFuturesEs, 60_000);
