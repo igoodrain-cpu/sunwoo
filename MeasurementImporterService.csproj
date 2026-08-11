@@ -1,0 +1,34 @@
+<Project Sdk="Microsoft.NET.Sdk.Worker">
+
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <RootNamespace>MeasurementImporterService</RootNamespace>
+    <UserSecretsId>c6e6b2d0-9f2b-4b8a-8e4a-measurement-importer</UserSecretsId>
+    <InvariantGlobalization>true</InvariantGlobalization>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- DB 접근 -->
+    <PackageReference Include="Npgsql" Version="8.0.3" />
+
+    <!-- 서비스 호스팅 (Windows 서비스 / Linux systemd 겸용) -->
+    <PackageReference Include="Microsoft.Extensions.Hosting" Version="8.0.0" />
+    <PackageReference Include="Microsoft.Extensions.Hosting.WindowsServices" Version="8.0.0" />
+    <PackageReference Include="Microsoft.Extensions.Hosting.Systemd" Version="8.0.0" />
+
+    <!-- 로깅 -->
+    <PackageReference Include="Serilog.Extensions.Hosting" Version="8.0.0" />
+    <PackageReference Include="Serilog.Settings.Configuration" Version="8.0.4" />
+    <PackageReference Include="Serilog.Sinks.Console" Version="5.0.1" />
+    <PackageReference Include="Serilog.Sinks.File" Version="5.0.0" />
+  </ItemGroup>
+
+  <!--
+    appsettings.json은 Microsoft.NET.Sdk.Worker가 기본적으로 이미
+    Content/CopyToOutputDirectory=PreserveNewest로 포함하므로 별도 선언 불필요.
+    (중복 선언 시 NETSDK1022 오류 발생)
+  -->
+
+</Project>
