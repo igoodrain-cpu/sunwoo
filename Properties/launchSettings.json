@@ -1,0 +1,9 @@
+{
+  "profiles": {
+    "Iruza": {
+      "commandName": "Project",
+      "workingDirectory": "D:\\26 AZ시스템\\국책과제_AI솔루션_기술개발_자료공유_260617\\Sample Code\\03 Iruza\\Iruza\\bin\\Debug\\net48",
+      "debugEngines": "managed,native"
+    }
+  }
+}
