@@ -312,16 +312,16 @@ namespace Iruza
             }
 
             Btn("CSV 가져오기", ImportCsv);
-            Btn("CSV 내보내기", ExportCsv);
             tb.Items.Add(new ToolStripSeparator());
-            Btn("스텝 추가", AddManual);
-            Btn("선택 삭제", DeleteSelected);
+            Btn("CSV 내보내기", ExportCsv);
+            //Btn("스텝 추가", AddManual);
+            //Btn("선택 삭제", DeleteSelected);
             tb.Items.Add(new ToolStripSeparator());
             Btn("차트 저장 PNG", SaveChartPng);
             tb.Items.Add(new ToolStripSeparator());
-            Btn("데이터셋 추가", AddDataset);
-            Btn("데이터셋 삭제", RemoveDataset);
-            tb.Items.Add(new ToolStripSeparator());
+           // Btn("데이터셋 추가", AddDataset);
+           // Btn("데이터셋 삭제", RemoveDataset);
+           // tb.Items.Add(new ToolStripSeparator());
             tb.Items.Add(new ToolStripLabel("  색상: "));
             _cbColor = new ComboBox
             {

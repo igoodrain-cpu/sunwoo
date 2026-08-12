@@ -8,7 +8,9 @@
 using System;
 using System.Collections.Generic;
 using System.Drawing;
+using System.IO;
 using System.Windows.Forms;
+using Iruza.src.Parameter;
 
 namespace Iruza
 {
@@ -23,6 +25,8 @@ namespace Iruza
 
         MeasurementViewerPanel _sourcePanel;
         MeasurementViewerPanel _biasPanel;
+
+        ParameterForm _ParaDlg;
 
         public MainShell()
         {
@@ -57,10 +61,24 @@ namespace Iruza
             BackColor = Color.White;
             Font = new Font("Malgun Gothic", 9f);
 
+            _tree = new TreeView
+            {
+                Dock = DockStyle.Fill,
+                Font = new Font("Malgun Gothic", 9.5f),
+                BorderStyle = BorderStyle.None,
+                HideSelection = false,
+                FullRowSelect = true,
+                ShowLines = true,
+                CheckBoxes = true,
+                ItemHeight = 26
+            };      
+
             BuildMenu();
-           
-            BuildTree();   // Dock=Left → 그 다음에 Controls.Add
             BuildTabs();   // Dock=Fill → 반드시 먼저 Controls.Add
+            BuildTree();   // Dock=Left → 그 다음에 Controls.Add
+
+            _tree.AfterCheck += tree_AfterCheck;
+
         }
 
         // ── 메뉴바 ──
@@ -69,10 +87,20 @@ namespace Iruza
             var menu = new MenuStrip();
 
             var mFile = new ToolStripMenuItem("파일(&F)");
-            mFile.DropDownItems.Add("CSV 가져오기", null, (s, e) => GetDataViewer()?.ImportCsv());
-            mFile.DropDownItems.Add("CSV 내보내기", null, (s, e) => GetDataViewer()?.ExportCsv());
-            mFile.DropDownItems.Add(new ToolStripSeparator());
-            mFile.DropDownItems.Add("차트 PNG 저장", null, (s, e) => GetDataViewer()?.SaveChartPng());
+           // mFile.DropDownItems.Add("CSV 가져오기", null, (s, e) => GetDataViewer()?.ImportCsv());
+           // mFile.DropDownItems.Add("CSV 내보내기", null, (s, e) => GetDataViewer()?.ExportCsv());
+           // mFile.DropDownItems.Add(new ToolStripSeparator());
+            //mFile.DropDownItems.Add("차트 PNG 저장", null, (s, e) => GetDataViewer()?.SaveChartPng());
+
+            mFile.DropDownItems.Add("파라미터 설정", null, (s, e) =>
+            {
+                GetDataViewer()?.SaveChartPng();
+
+                _ParaDlg = new ParameterForm(_root);
+                _ParaDlg.ShowDialog();
+            });
+
+
             mFile.DropDownItems.Add(new ToolStripSeparator());
             mFile.DropDownItems.Add("종료(&X)", null, (s, e) => Close());
 
@@ -172,7 +200,7 @@ namespace Iruza
         // ── 좌측 트리(그리드 트리) 메뉴 (Dock.Left 이므로 탭 다음에 Controls 에 추가) ──
         void BuildTree()
         {
-            _tree = new TreeView
+         /*   _tree = new TreeView
             {
                 Dock = DockStyle.Fill,
                 Font = new Font("Malgun Gothic", 9.5f),
@@ -184,21 +212,45 @@ namespace Iruza
                 ItemHeight = 26
             };
 
-            _tree.AfterCheck += tree_AfterCheck;
+            _tree.AfterCheck += tree_AfterCheck;*/
 
             _root = new TreeNode("Smith Chart Fingerprint");
             //root.Nodes.Add(new TreeNode("Plasma Fingerprint 분석"));
 
-
-            // DB에서 Data에 tree node를 add하는 부분
             _root.Nodes.Add(new TreeNode("20260727122030_normal"));
             _root.Nodes.Add(new TreeNode("20260727122030_Abnormal"));
+
+            // PostgreSQL의 process_run 데이터를 트리 노드로 로드
+            try
+            {
+                var parameterPath = Path.Combine(Application.StartupPath, "Parameter", "ParameterSetting.json");
+                var parameterSetting = ParameterSetting.Load(parameterPath);
+
+                var startTime = parameterSetting.StartTime;
+                var endTime = parameterSetting.EndTime;
+
+                foreach (var runName in MeasurementDb.GetProcessRunNames(startTime, endTime))
+                    _root.Nodes.Add(new TreeNode(runName));
+            }
+            catch (Exception ex)
+            {
+
+
+                MessageBox.Show(
+                    "PostgreSQL 연결 실패. 샘플 데이터로 표시합니다.\n\n" + ex.Message,
+                    "DB 연결",
+                    MessageBoxButtons.OK,
+                    MessageBoxIcon.Warning);
+            }
+
+            if (_root.Nodes.Count == 0)
+                _root.Nodes.Add(new TreeNode("데이터 없음"));
             // root.Nodes.Add(new TreeNode("임피던스 매칭 계산기"));
             _tree.Nodes.Add(_root);
             _root.Expand();
             _tree.SelectedNode = _root.Nodes[0];
 
-            // 트리 노드 선택 → 우측 탭 전환
+            // 트리 노드 선택 → 선택시에 코드내부로 route를 탄다. 선택한 Tree node알아 내기 
             _tree.AfterSelect += (s, e) =>
             {
                 if (e.Node == null || e.Node.Parent == null) return;
