@@ -67,19 +67,33 @@ namespace Iruza
             RefreshAll();
         }
 
-        public void OverlappedChart(int i, TreeNode root)
+        public void OverlappedChart(int i, TreeNode root , string pName)
         {
             BackColor = Color.White;
 
-            var initial = (i == 0)
-                ? MeasurementDataset.CreateSample()
-                : MeasurementDataset.CreateSampleBt();
+         //   var initial = (i == 0)
+         //       ? MeasurementDataset.CreateSample()
+         //       : MeasurementDataset.CreateSampleBt();
 
-           /// _dsList = new List<MeasurementDataset> { initial };
-           /// _activeDsIndex = 0;
-           /// _selectedDsIndices = new List<int> { 0 };
+            /// _dsList = new List<MeasurementDataset> { initial };
+            /// _activeDsIndex = 0;
+            /// _selectedDsIndices = new List<int> { 0 };
 
-            AddDataset(new MeasurementDataset { Z0 = 50, Name = $"Dataset{_dsList.Count + 1}" });
+            //AddDataset(new MeasurementDataset { Z0 = 50, Name = $"Dataset{_dsList.Count + 1}" });
+
+            foreach (MeasurementDataset dataset in _dsList)
+            {
+                string name = dataset.Name;
+
+                if(name == pName)
+                {
+
+                    return;
+                }
+
+            }
+
+            AddDataset(new MeasurementDataset { Z0 = 50, Name = pName });
 
             //BuildLayout();
             //RefreshDatasetList();

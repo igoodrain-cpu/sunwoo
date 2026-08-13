@@ -279,19 +279,50 @@ namespace Iruza
                 BackColor = Color.WhiteSmoke,
                 Padding = new Padding(6, 6, 4, 6)
             };
+
+            // [ADD] 트리 밑에 붙일 검색 버튼
+            var btnSearch = new Button
+            {
+                Text = "검색",
+                Dock = DockStyle.Bottom,
+                Height = 32,
+                Font = new Font("Malgun Gothic", 9.5f)
+            };
+            btnSearch.Click += (s, e) =>
+            {
+
+                foreach (TreeNode node in _root.Nodes)
+                {
+                    string name = node.Text;
+                    // Console.WriteLine(name);
+                    if (node.Checked)
+                        _sourcePanel.OverlappedChart(0, _root, name);
+                }            
+
+                // TODO: 검색 로직 연결 (예: ParameterSetting의 기간으로 MeasurementDb 재조회 후 트리 리로드)
+                MessageBox.Show("검색 기능은 아직 구현되지 않았습니다.", "검색",
+                    MessageBoxButtons.OK, MessageBoxIcon.Information);
+            };
+
             _leftPanel.Controls.Add(_tree);
+            _leftPanel.Controls.Add(btnSearch);
 
             Controls.Add(_leftPanel);   // [FIX] Dock=Left → _tabs(Fill) 다음에 추가해야
                                         // 탭 영역이 이 폭만큼 정상적으로 밀려남
         }
 
+        /// <summary>
+        ///  check가 된 Data만이 스미스차트를 그리고, data를 화면에 표시한다.
+        /// </summary>
+        /// <param name="sender"></param>
+        /// <param name="e"></param>
         private void tree_AfterCheck(object sender, TreeViewEventArgs e)
         {
             List<string> checkedNodes = new List<string>();
 
             GetCheckedNodes(_tree.Nodes, checkedNodes);
 
-            _sourcePanel.OverlappedChart(0, _root);
+            //_sourcePanel.OverlappedChart(0, _root);
 
             foreach (string nodeText in checkedNodes)
             {
