@@ -41,7 +41,7 @@ namespace Iruza
         {
             BackColor = Color.White;
 
-            _dsList = new List<MeasurementDataset> { MeasurementDataset.CreateSample() };
+            _dsList = new List<MeasurementDataset> { MeasurementDataset.CreateSample("Test1") };
             _activeDsIndex = 0;
             _selectedDsIndices = new List<int> { 0 };
 
@@ -50,17 +50,20 @@ namespace Iruza
             RefreshAll();
         }
 
-        public MeasurementViewerPanel(int i, TreeNode root)
+        public MeasurementViewerPanel(int i, TreeNode root, bool pInit)
         {
             BackColor = Color.White;
 
-            var initial = (i == 0)
-                ? MeasurementDataset.CreateSample()
-                : MeasurementDataset.CreateSampleBt();
+            if(pInit == false)
+            {
+                var initial = (i == 0)
+                ? MeasurementDataset.CreateSample("Test1")
+                : MeasurementDataset.CreateSampleBt("Test2");
 
-            _dsList = new List<MeasurementDataset> { initial };
-            _activeDsIndex = 0;
-            _selectedDsIndices = new List<int> { 0 };
+                _dsList = new List<MeasurementDataset> { initial };
+                _activeDsIndex = 0;
+                _selectedDsIndices = new List<int> { 0 };
+            }
 
             BuildLayout();
             RefreshDatasetList();
@@ -71,13 +74,7 @@ namespace Iruza
         {
             BackColor = Color.White;
 
-         //   var initial = (i == 0)
-         //       ? MeasurementDataset.CreateSample()
-         //       : MeasurementDataset.CreateSampleBt();
 
-            /// _dsList = new List<MeasurementDataset> { initial };
-            /// _activeDsIndex = 0;
-            /// _selectedDsIndices = new List<int> { 0 };
 
             //AddDataset(new MeasurementDataset { Z0 = 50, Name = $"Dataset{_dsList.Count + 1}" });
 
@@ -93,10 +90,26 @@ namespace Iruza
 
             }
 
-            AddDataset(new MeasurementDataset { Z0 = 50, Name = pName });
+            if(_dsList.Count == 0)
+            {
+                var initial = (i == 0)
+                ? MeasurementDataset.CreateSample(pName)
+                : MeasurementDataset.CreateSampleBt(pName);
+
+                _dsList = new List<MeasurementDataset> { initial };
+                _activeDsIndex = 0;
+                _selectedDsIndices = new List<int> { 0 };
+            }
+            else
+            {
+                AddDataset(new MeasurementDataset { Z0 = 50, Name = pName });
+            }
+
+
+            //AddDataset(new MeasurementDataset { Z0 = 50, Name = pName });
 
             //BuildLayout();
-            //RefreshDatasetList();
+            RefreshDatasetList();
             RefreshAll();
         }
 
@@ -161,8 +174,8 @@ namespace Iruza
             if (_activeDsIndex < 0 || _activeDsIndex >= _dsList.Count) return;
             int removed = _activeDsIndex;
             _dsList.RemoveAt(removed);
-            if (_dsList.Count == 0)
-                _dsList.Add(MeasurementDataset.CreateSample());
+           // if (_dsList.Count == 0)
+           //     _dsList.Add(MeasurementDataset.CreateSample(_dsList.));
 
             // 삭제된 인덱스 이후 항목들의 인덱스를 1씩 당겨서 선택 목록 재정렬
             _selectedDsIndices = _selectedDsIndices

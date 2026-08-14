@@ -148,7 +148,7 @@ namespace Iruza
                 Padding = new Padding(6, 0, 0, 0)
             };
             //var sourcePanel = new MeasurementViewerPanel { Dock = DockStyle.Fill };
-            _sourcePanel = new MeasurementViewerPanel(0, _root) { Dock = DockStyle.Fill };
+            _sourcePanel = new MeasurementViewerPanel(0, _root, true) { Dock = DockStyle.Fill };
 
             var sourceContainer = new Panel { Dock = DockStyle.Fill };
             sourceContainer.Controls.Add(_sourcePanel);   // Fill → 먼저 추가
@@ -165,7 +165,7 @@ namespace Iruza
             };
             //var biasPanel = new MeasurementViewerPanel { Dock = DockStyle.Fill };
             //var biasPanel = new MeasurementViewerPanel(1, _root) { Dock = DockStyle.Fill };
-            _biasPanel = new MeasurementViewerPanel(1, _root) { Dock = DockStyle.Fill };
+            _biasPanel = new MeasurementViewerPanel(1, _root, true) { Dock = DockStyle.Fill };
 
             var biasContainer = new Panel { Dock = DockStyle.Fill };
             biasContainer.Controls.Add(_biasPanel);   // Fill → 먼저 추가
@@ -296,7 +296,11 @@ namespace Iruza
                     string name = node.Text;
                     // Console.WriteLine(name);
                     if (node.Checked)
+                    {
                         _sourcePanel.OverlappedChart(0, _root, name);
+                        _biasPanel.OverlappedChart(1, _root, name);
+                    }
+                        
                 }            
 
                 // TODO: 검색 로직 연결 (예: ParameterSetting의 기간으로 MeasurementDb 재조회 후 트리 리로드)

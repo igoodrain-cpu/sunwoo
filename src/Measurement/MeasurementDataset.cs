@@ -124,9 +124,9 @@ namespace Iruza
         }
 
         // ── 샘플 데이터 생성 ──
-        public static MeasurementDataset CreateSample()
+        public static MeasurementDataset CreateSample(string pName)
         {
-            var ds = new MeasurementDataset { Name = "샘플 측정", Z0 = 50 };
+            var ds = new MeasurementDataset { Name = pName, Z0 = 50 };
             ds.Add(1,  10.0, 0.200,  0.0,  100)
               .Add(2,  10.0, 0.185, 15.0,   90)
               .Add(3,  10.0, 0.168, 30.0,   80)
@@ -142,9 +142,9 @@ namespace Iruza
             ds.Steps[0].DeliveredP_W = 96;
             return ds;
         }
-        public static MeasurementDataset CreateSampleBt()
+        public static MeasurementDataset CreateSampleBt(string pName)
         {
-            var ds = new MeasurementDataset { Name = "샘플 측정", Z0 = 50 };
+            var ds = new MeasurementDataset { Name = pName, Z0 = 50 };
             ds.Add(1, 10.0, 0.100, 0.0, 100)
               .Add(2, 10.0, 0.155, 15.0, 90)
               .Add(3, 10.0, 0.138, 30.0, 80)
