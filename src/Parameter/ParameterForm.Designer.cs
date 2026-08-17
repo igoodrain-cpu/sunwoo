@@ -34,12 +34,14 @@
             this.dtpEndTime = new System.Windows.Forms.DateTimePicker();
             this.btnSave = new System.Windows.Forms.Button();
             this.btnSearch = new System.Windows.Forms.Button();
+            this.gbSearch = new System.Windows.Forms.GroupBox();
+            this.gbSearch.SuspendLayout();
             this.SuspendLayout();
             // 
             // lblStartTime
             // 
             this.lblStartTime.AutoSize = true;
-            this.lblStartTime.Location = new System.Drawing.Point(33, 36);
+            this.lblStartTime.Location = new System.Drawing.Point(20, 33);
             this.lblStartTime.Name = "lblStartTime";
             this.lblStartTime.Size = new System.Drawing.Size(63, 12);
             this.lblStartTime.TabIndex = 0;
@@ -48,7 +50,7 @@
             // lblEndTime
             // 
             this.lblEndTime.AutoSize = true;
-            this.lblEndTime.Location = new System.Drawing.Point(33, 89);
+            this.lblEndTime.Location = new System.Drawing.Point(20, 86);
             this.lblEndTime.Name = "lblEndTime";
             this.lblEndTime.Size = new System.Drawing.Size(60, 12);
             this.lblEndTime.TabIndex = 1;
@@ -58,7 +60,7 @@
             // 
             this.dtpStartTime.CustomFormat = "yyyy-MM-dd HH:mm:ss";
             this.dtpStartTime.Format = System.Windows.Forms.DateTimePickerFormat.Custom;
-            this.dtpStartTime.Location = new System.Drawing.Point(121, 30);
+            this.dtpStartTime.Location = new System.Drawing.Point(108, 27);
             this.dtpStartTime.Name = "dtpStartTime";
             this.dtpStartTime.Size = new System.Drawing.Size(221, 21);
             this.dtpStartTime.TabIndex = 2;
@@ -67,14 +69,14 @@
             // 
             this.dtpEndTime.CustomFormat = "yyyy-MM-dd HH:mm:ss";
             this.dtpEndTime.Format = System.Windows.Forms.DateTimePickerFormat.Custom;
-            this.dtpEndTime.Location = new System.Drawing.Point(121, 83);
+            this.dtpEndTime.Location = new System.Drawing.Point(108, 80);
             this.dtpEndTime.Name = "dtpEndTime";
             this.dtpEndTime.Size = new System.Drawing.Size(221, 21);
             this.dtpEndTime.TabIndex = 3;
             // 
             // btnSave
             // 
-            this.btnSave.Location = new System.Drawing.Point(267, 135);
+            this.btnSave.Location = new System.Drawing.Point(298, 178);
             this.btnSave.Name = "btnSave";
             this.btnSave.Size = new System.Drawing.Size(75, 29);
             this.btnSave.TabIndex = 4;
@@ -84,7 +86,7 @@
             // 
             // btnSearch
             // 
-            this.btnSearch.Location = new System.Drawing.Point(177, 135);
+            this.btnSearch.Location = new System.Drawing.Point(12, 178);
             this.btnSearch.Name = "btnSearch";
             this.btnSearch.Size = new System.Drawing.Size(75, 29);
             this.btnSearch.TabIndex = 4;
@@ -93,17 +95,27 @@
             this.btnSearch.UseVisualStyleBackColor = true;
             this.btnSearch.Click += new System.EventHandler(this.btnSearch_Click);
             // 
+            // gbSearch
+            // 
+            this.gbSearch.Controls.Add(this.dtpEndTime);
+            this.gbSearch.Controls.Add(this.lblStartTime);
+            this.gbSearch.Controls.Add(this.lblEndTime);
+            this.gbSearch.Controls.Add(this.dtpStartTime);
+            this.gbSearch.Location = new System.Drawing.Point(12, 12);
+            this.gbSearch.Name = "gbSearch";
+            this.gbSearch.Size = new System.Drawing.Size(361, 139);
+            this.gbSearch.TabIndex = 5;
+            this.gbSearch.TabStop = false;
+            this.gbSearch.Text = "검색 기간";
+            // 
             // ParameterForm
             // 
             this.AutoScaleDimensions = new System.Drawing.SizeF(7F, 12F);
             this.AutoScaleMode = System.Windows.Forms.AutoScaleMode.Font;
-            this.ClientSize = new System.Drawing.Size(390, 191);
+            this.ClientSize = new System.Drawing.Size(392, 232);
+            this.Controls.Add(this.gbSearch);
             this.Controls.Add(this.btnSearch);
             this.Controls.Add(this.btnSave);
-            this.Controls.Add(this.dtpEndTime);
-            this.Controls.Add(this.dtpStartTime);
-            this.Controls.Add(this.lblEndTime);
-            this.Controls.Add(this.lblStartTime);
             this.FormBorderStyle = System.Windows.Forms.FormBorderStyle.FixedDialog;
             this.MaximizeBox = false;
             this.MinimizeBox = false;
@@ -111,8 +123,9 @@
             this.StartPosition = System.Windows.Forms.FormStartPosition.CenterParent;
             this.Text = "Parameter";
             this.Load += new System.EventHandler(this.ParameterForm_Load);
+            this.gbSearch.ResumeLayout(false);
+            this.gbSearch.PerformLayout();
             this.ResumeLayout(false);
-            this.PerformLayout();
 
         }
 
@@ -124,5 +137,6 @@
         private System.Windows.Forms.DateTimePicker dtpEndTime;
         private System.Windows.Forms.Button btnSave;
         private System.Windows.Forms.Button btnSearch;
+        private System.Windows.Forms.GroupBox gbSearch;
     }
 }

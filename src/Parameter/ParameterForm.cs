@@ -74,9 +74,10 @@ namespace Iruza.src.Parameter
 
                 _treeNode.Nodes.Clear();
 
+
+                // DB에서 데이터를 조회하여 트리 노드에 추가
                 foreach (var runName in MeasurementDb.GetProcessRunNames(startTime, endTime))
                     _treeNode.Nodes.Add(new TreeNode(runName));
-
 
                 _treeNode.Nodes.Add(new TreeNode("test1"));
                 _treeNode.Nodes.Add(new TreeNode("test2"));

@@ -28,6 +28,8 @@ namespace Iruza
 
         ParameterForm _ParaDlg;
 
+        List<ProcessRunRecord> _processRecord; 
+
         public MainShell()
         {
             /*
@@ -290,6 +292,7 @@ namespace Iruza
             };
             btnSearch.Click += (s, e) =>
             {
+                _processRecord = new List<ProcessRunRecord>();
 
                 foreach (TreeNode node in _root.Nodes)
                 {
