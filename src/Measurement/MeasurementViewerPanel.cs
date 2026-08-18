@@ -726,6 +726,17 @@ namespace Iruza
             foreach (var ov in _overlays)
                 if (ov.Ds != null && ov.Ds.Steps.Any())
                     DrawData(g, cx, cy, rad, ov);
+
+            var hovered = _overlays.FirstOrDefault(x => x.DsIndex == _hlDsIdx);
+            if (hovered != null && hovered.Ds != null && _hlStepIdx >= 0 && _hlStepIdx < hovered.Ds.Steps.Count)
+            {
+                var s = hovered.Ds.Steps[_hlStepIdx];
+                if (s.GammaMag <= 1.05)
+                {
+                    var sp = Sp(s.Gamma_Real, s.Gamma_Imag, cx, cy, rad);
+                    DrawTooltip(g, hovered, s, sp);
+                }
+            }
         }
 
         void DrawGrid(Graphics g, float cx, float cy, float rad)
@@ -796,9 +807,6 @@ namespace Iruza
                 g.DrawLines(tp, pts);
             }
 
-            MeasurementStep hlStep = null;
-            PointF hlPoint = default;
-
             for (int i = 0; i < ds.Steps.Count; i++)
             {
                 var s = ds.Steps[i];
@@ -820,11 +828,7 @@ namespace Iruza
 
                 g.DrawString(s.Step.ToString(), new Font("Arial", 7f, FontStyle.Bold),
                     new SolidBrush(ov.Color), sp.X + sz + 2, sp.Y - 4);
-
-                if (hl) { hlStep = s; hlPoint = sp; }
             }
-
-            if (hlStep != null) DrawTooltip(g, ov, hlStep, hlPoint);
         }
 
         // [ADD] 2개 이상의 데이터셋이 겹쳐 표시될 때 좌상단에 범례 표시
@@ -863,8 +867,10 @@ namespace Iruza
             var f = new Font("Consolas", 7.5f);
             float fw = lines.Max(l => g.MeasureString(l, f).Width) + 10, fh = lines.Length * 13f + 8;
             float tx = sp.X + 12, ty = sp.Y - fh / 2;
+            ty = sp.Y - fh - 12;
             if (tx + fw > Width) tx = sp.X - fw - 12;
-            if (ty < 4) ty = 4; if (ty + fh > Height) ty = Height - fh - 4;
+            if (ty < 4) ty = sp.Y + 12;
+            if (ty + fh > Height) ty = Height - fh - 4;
             g.FillRectangle(new SolidBrush(Color.FromArgb(240, 245, 255, 255)), tx, ty, fw, fh);
             g.DrawRectangle(new Pen(ov.Color), tx, ty, fw, fh);
             for (int li = 0; li < lines.Length; li++)

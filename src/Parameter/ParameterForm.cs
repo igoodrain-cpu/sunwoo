@@ -37,8 +37,8 @@ namespace Iruza.src.Parameter
             MessageBox.Show("파라미터가 저장되었습니다.", "저장 완료",
                 MessageBoxButtons.OK, MessageBoxIcon.Information);
 
-            DialogResult = DialogResult.OK;
-            Close();
+            //DialogResult = DialogResult.OK;
+            //Close();
         }
 
         private void LoadParameterSetting()

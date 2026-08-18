@@ -347,8 +347,8 @@ namespace Iruza
 
 
                     // TODO: 검색 로직 연결 (예: ParameterSetting의 기간으로 MeasurementDb 재조회 후 트리 리로드)
-                    MessageBox.Show("검색 기능은 아직 구현되지 않았습니다.", "검색",
-                    MessageBoxButtons.OK, MessageBoxIcon.Information);
+                    //MessageBox.Show("검색 기능은 아직 구현되지 않았습니다.", "검색",
+                    //MessageBoxButtons.OK, MessageBoxIcon.Information);
             };
 
             _leftPanel.Controls.Add(_tree);
