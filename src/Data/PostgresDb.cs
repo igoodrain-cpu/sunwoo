@@ -204,7 +204,7 @@ WHERE run_name = @run_name;";
 SELECT step_id, run_id, step_num, step_name, log_date, log_time,
        srf_freq, s_fwd, s_ref, s_vrms, s_irms, s_phase, s_delivered_pwr,
        s_preset_load, s_preset_tune, s_load_pos, s_tune_pos,
-       brf_freq, b_fwd, b_ref, b_vrms, b_irms, b_phase, b_delivered_pwr,
+       br_freq, b_fwd, b_ref, b_vrms, b_irms, b_phase, b_delivered_pwr,
        b_preset_load, b_preset_tune, b_load_pos, b_tune_pos,
        ar_flow, o2_flow, apc_pressure, apc_position, vvc1, vvc2, vvc3, proc_status
 FROM process_step
@@ -397,7 +397,7 @@ ORDER BY s.step_num ASC;";
                 SPresetTune = GetValue<decimal?>(reader, "s_preset_tune"),
                 SLoadPos = GetValue<decimal?>(reader, "s_load_pos"),
                 STunePos = GetValue<decimal?>(reader, "s_tune_pos"),
-                BrfFreq = GetValue<decimal?>(reader, "brf_freq"),
+                BrfFreq = GetValue<decimal?>(reader, "br_freq"),
                 BFwd = GetValue<decimal?>(reader, "b_fwd"),
                 BRef = GetValue<decimal?>(reader, "b_ref"),
                 BVrms = GetValue<decimal?>(reader, "b_vrms"),

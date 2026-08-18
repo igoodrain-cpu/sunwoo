@@ -15,6 +15,7 @@ namespace Iruza.src.Parameter
             this.StartPosition = FormStartPosition.CenterScreen;
             _parameterFilePath = Path.Combine(Application.StartupPath, "Parameter", "ParameterSetting.json");
 
+
             _treeNode = treeNode;
         }
 
@@ -79,8 +80,8 @@ namespace Iruza.src.Parameter
                 foreach (var runName in MeasurementDb.GetProcessRunNames(startTime, endTime))
                     _treeNode.Nodes.Add(new TreeNode(runName));
 
-                _treeNode.Nodes.Add(new TreeNode("test1"));
-                _treeNode.Nodes.Add(new TreeNode("test2"));
+               // _treeNode.Nodes.Add(new TreeNode("test1"));
+               // _treeNode.Nodes.Add(new TreeNode("test2"));
 
                 Close();
             }

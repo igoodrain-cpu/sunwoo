@@ -10,6 +10,7 @@ using System.Collections.Generic;
 using System.Drawing;
 using System.IO;
 using System.Windows.Forms;
+using System.Xml.Linq;
 using Iruza.src.Parameter;
 
 namespace Iruza
@@ -219,8 +220,8 @@ namespace Iruza
             _root = new TreeNode("Smith Chart Fingerprint");
             //root.Nodes.Add(new TreeNode("Plasma Fingerprint 분석"));
 
-            _root.Nodes.Add(new TreeNode("20260727122030_normal"));
-            _root.Nodes.Add(new TreeNode("20260727122030_Abnormal"));
+           // _root.Nodes.Add(new TreeNode("20260727122030_normal"));
+           // _root.Nodes.Add(new TreeNode("20260727122030_Abnormal"));
 
             // PostgreSQL의 process_run 데이터를 트리 노드로 로드
             try
@@ -294,20 +295,59 @@ namespace Iruza
             {
                 _processRecord = new List<ProcessRunRecord>();
 
+                
+
                 foreach (TreeNode node in _root.Nodes)
                 {
                     string name = node.Text;
                     // Console.WriteLine(name);
                     if (node.Checked)
                     {
-                        _sourcePanel.OverlappedChart(0, _root, name);
-                        _biasPanel.OverlappedChart(1, _root, name);
+                        ProcessRunRecord iprocessRunRecord = new ProcessRunRecord();
+                        iprocessRunRecord = MeasurementDb.GetProcessRunByName(name);
+
+                        if(iprocessRunRecord != null)
+                        {
+                            List<ProcessStepRecord> iProcessStepRecord = new List<ProcessStepRecord>();
+                            iProcessStepRecord = MeasurementDb.GetProcessStepsByRunId(iprocessRunRecord.RunId);
+
+
+                            MeasurementDataset iSmeasurementDataset = new MeasurementDataset();
+                            iSmeasurementDataset = MeasurementDb.GetMeasurementDatasetByRunId(iprocessRunRecord.RunId, "source", 50);
+
+                            MeasurementDataset iBmeasurementDataset = new MeasurementDataset();
+                            iBmeasurementDataset = MeasurementDb.GetMeasurementDatasetByRunId(iprocessRunRecord.RunId, "bias", 50);
+
+                            _sourcePanel.OverlappedChartDisplay(0, _root, name, iSmeasurementDataset);
+                            _biasPanel.OverlappedChartDisplay(1, _root, name, iBmeasurementDataset);
+
+                        }
+
+                       // _sourcePanel.OverlappedChart(0, _root, name);
+                       // _biasPanel.OverlappedChart(1, _root, name);
                     }
                         
-                }            
+                }
 
-                // TODO: 검색 로직 연결 (예: ParameterSetting의 기간으로 MeasurementDb 재조회 후 트리 리로드)
-                MessageBox.Show("검색 기능은 아직 구현되지 않았습니다.", "검색",
+
+                _processRecord = MeasurementDb.GetProcessRuns();
+
+
+                foreach (TreeNode node in _root.Nodes) 
+                    foreach (var runName in _processRecord)
+                    {
+
+                        if (node.ToString() == runName.RunName && node.Checked == true)
+                        {
+                            ProcessRunRecord iprocessRunRecord = new ProcessRunRecord();
+                            iprocessRunRecord = runName;
+                        }
+
+                    }
+
+
+                    // TODO: 검색 로직 연결 (예: ParameterSetting의 기간으로 MeasurementDb 재조회 후 트리 리로드)
+                    MessageBox.Show("검색 기능은 아직 구현되지 않았습니다.", "검색",
                     MessageBoxButtons.OK, MessageBoxIcon.Information);
             };
 

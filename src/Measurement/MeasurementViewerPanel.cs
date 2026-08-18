@@ -33,6 +33,7 @@ namespace Iruza
         private DataGridView _grid;
         private Label _statLbl;
         private ComboBox _cbColor;
+        private CheckBox _chkOverlay;          // [ADD] 겹쳐보기 단일 체크박스
         private FlowLayoutPanel _dsCheckPanel;   // [ADD] 데이터셋 체크박스(겹쳐보기 선택) 목록
         private int _activeIdx = -1;
         private bool _isUpdatingSelection = false;
@@ -54,7 +55,7 @@ namespace Iruza
         {
             BackColor = Color.White;
 
-            if(pInit == false)
+       /*     if(pInit == false)
             {
                 var initial = (i == 0)
                 ? MeasurementDataset.CreateSample("Test1")
@@ -63,9 +64,71 @@ namespace Iruza
                 _dsList = new List<MeasurementDataset> { initial };
                 _activeDsIndex = 0;
                 _selectedDsIndices = new List<int> { 0 };
-            }
+            }*/
 
             BuildLayout();
+            RefreshDatasetList();
+            RefreshAll();
+        }
+
+
+        public void OverlappedChartDisplay(int i, TreeNode root, string pName, MeasurementDataset pMeasurementDataset)
+        {
+            BackColor = Color.White;
+
+
+            if(i == 0)
+            {
+                pName = pName + "_source";
+            }
+            else
+            {
+                pName = pName + "_bias";
+            }
+                           
+
+            //AddDataset(new MeasurementDataset { Z0 = 50, Name = $"Dataset{_dsList.Count + 1}" });
+
+            foreach (MeasurementDataset dataset in _dsList)
+            {
+                string name = dataset.Name;
+
+                if (name == pName)
+                {
+
+                    return;
+                }
+
+            }
+
+            if (_dsList.Count == 0)
+            {
+                // List<MeasurementDataset> _dsList = new List<MeasurementDataset>();에 아무데이터도 없을시 MeasurementDataset initial = new MeasurementDataset();를 생성하여 _dsList에 추가
+                //  var initial = (i == 0)
+                //  ? MeasurementDataset.CreateSample(pName)
+                // : MeasurementDataset.CreateSampleBt(pName);
+
+                // _dsList = new List<MeasurementDataset> { initial };
+
+                var initial = new MeasurementDataset();
+                initial = pMeasurementDataset;
+
+                _dsList = new List<MeasurementDataset> { initial };
+                _activeDsIndex = 0;
+                _selectedDsIndices = new List<int> { 0 };
+            }
+            else
+            {
+                var initial = new MeasurementDataset();
+                initial = pMeasurementDataset;
+                AddDataset(initial,true);
+                //AddDataset(new MeasurementDataset { Z0 = 50, Name = pName });
+            }
+
+
+            //AddDataset(new MeasurementDataset { Z0 = 50, Name = pName });
+
+            //BuildLayout();
             RefreshDatasetList();
             RefreshAll();
         }
@@ -92,11 +155,14 @@ namespace Iruza
 
             if(_dsList.Count == 0)
             {
+                // List<MeasurementDataset> _dsList = new List<MeasurementDataset>();에 아무데이터도 없을시 MeasurementDataset initial = new MeasurementDataset();를 생성하여 _dsList에 추가
                 var initial = (i == 0)
                 ? MeasurementDataset.CreateSample(pName)
                 : MeasurementDataset.CreateSampleBt(pName);
 
                 _dsList = new List<MeasurementDataset> { initial };
+
+
                 _activeDsIndex = 0;
                 _selectedDsIndices = new List<int> { 0 };
             }
@@ -208,14 +274,6 @@ namespace Iruza
             _dsCheckPanel.SuspendLayout();
             _dsCheckPanel.Controls.Clear();
 
-            _dsCheckPanel.Controls.Add(new Label
-            {
-                Text = "겹쳐보기:",
-                AutoSize = true,
-                TextAlign = ContentAlignment.MiddleLeft,
-                Padding = new Padding(4, 7, 2, 0)
-            });
-
             for (int i = 0; i < _dsList.Count; i++)
             {
                 int idx = i; // 클로저 캡처용
@@ -224,7 +282,7 @@ namespace Iruza
                     Text = string.IsNullOrEmpty(_dsList[i].Name) ? $"Dataset{i + 1}" : _dsList[i].Name,
                     AutoSize = true,
                     Checked = _selectedDsIndices.Contains(idx),
-                    Padding = new Padding(4, 4, 10, 4),
+                    Margin = new Padding(0, 3, 12, 3),
                     Font = (idx == _activeDsIndex) ? new Font(Font, FontStyle.Bold) : Font,
                     ForeColor = MeasurementChartPanel.DatasetPalette[idx % MeasurementChartPanel.DatasetPalette.Length]
                 };
@@ -249,22 +307,76 @@ namespace Iruza
                 _dsCheckPanel.Controls.Add(cb);
             }
             _dsCheckPanel.ResumeLayout();
+            UpdateOverlayUiState();
+        }
+
+        void UpdateOverlayUiState()
+        {
+            bool enabled = _chkOverlay == null || _chkOverlay.Checked;
+
+            if (_dsCheckPanel != null)
+            {
+                foreach (Control c in _dsCheckPanel.Controls)
+                    c.Enabled = enabled;
+
+                _dsCheckPanel.BackColor = enabled
+                    ? Color.Transparent
+                    : Color.FromArgb(245, 245, 245);
+            }
         }
 
         void BuildLayout()
         {
             var toolbar = BuildToolbar();
 
+            var overlayBar = new Panel
+            {
+                Dock = DockStyle.Top,
+                Height = 52,
+                BackColor = Color.FromArgb(250, 250, 252)
+            };
+
+            _chkOverlay = new CheckBox
+            {
+                Text = "겹쳐보기",
+                AutoSize = true,
+                Checked = true,
+                Location = new Point(8, 15)
+            };
+            _chkOverlay.CheckedChanged += (s, e) =>
+            {
+                UpdateOverlayUiState();
+                RefreshAll();
+            };
+
+            var dsLabel = new Label
+            {
+                Text = "데이터셋:",
+                AutoSize = true,
+                Location = new Point(95, 16)
+            };
+
             // [ADD] 데이터셋 겹쳐보기 체크박스 행 (툴바 바로 아래)
             _dsCheckPanel = new FlowLayoutPanel
             {
-                Dock = DockStyle.Top,
-                Height = 30,
+                Location = new Point(160, 8),
+                Height = 36,
                 AutoScroll = true,
                 FlowDirection = FlowDirection.LeftToRight,
                 WrapContents = false,
-                BackColor = Color.FromArgb(250, 250, 252)
+                Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right,
+                BackColor = Color.Transparent
             };
+
+            overlayBar.Resize += (s, e) =>
+            {
+                int left = dsLabel.Right + 8;
+                _dsCheckPanel.SetBounds(left, 8, Math.Max(80, overlayBar.ClientSize.Width - left - 6), overlayBar.ClientSize.Height - 16);
+            };
+
+            overlayBar.Controls.Add(_chkOverlay);
+            overlayBar.Controls.Add(dsLabel);
+            overlayBar.Controls.Add(_dsCheckPanel);
 
             var split = new SplitContainer
             {
@@ -323,7 +435,7 @@ namespace Iruza
 
             // Dock 순서: Fill(split) → Top(체크박스 행) → Top(toolbar, 맨 위)
             Controls.Add(split);
-            Controls.Add(_dsCheckPanel);
+            Controls.Add(overlayBar);
             Controls.Add(toolbar);
         }
 
@@ -397,7 +509,13 @@ namespace Iruza
         {
             RefreshGrid(); RefreshStats();
             // [CHG] 체크된 모든 데이터셋을 함께 넘겨서 스미스차트에 겹쳐 그리게 함
-            _chart.SetDatasets(GetOverlaySelection(), _cbColor?.SelectedIndex ?? 0);
+            var datasets = (_chkOverlay != null && !_chkOverlay.Checked)
+                ? ((_ds != null)
+                    ? new List<(int idx, MeasurementDataset ds)> { (_activeDsIndex, _ds) }
+                    : new List<(int idx, MeasurementDataset ds)>())
+                : GetOverlaySelection();
+
+            _chart.SetDatasets(datasets, _cbColor?.SelectedIndex ?? 0);
         }
 
         void RefreshGrid()
