@@ -295,7 +295,7 @@ WHERE s.run_id = @run_id";
             return result;
         }
 
-        public static MeasurementDataset GetMeasurementDatasetByRunId(long runId, string channel, double z0 = 50.0)
+        public static MeasurementDataset GetMeasurementDatasetByRunId(long runId, string channel, double z0 = 50.0, List<ProcessStepRecord> steps = null)
         {
             const string sql = @"
 SELECT r.run_name,
@@ -313,6 +313,7 @@ WHERE r.run_id = @run_id
 ORDER BY s.step_num ASC;";
 
             MeasurementDataset ds = null;
+            int i = 0;
 
             using (var conn = CreateConnection())
             using (var cmd = new NpgsqlCommand(sql, conn))
@@ -349,8 +350,25 @@ ORDER BY s.step_num ASC;";
                             Z_Normalized = GetString(reader, "z_normalized"),
                             ForwardP_W = ToDouble(GetValue<decimal?>(reader, "forward_p_w")),
                             ReflectedP_W = ToDouble(GetValue<decimal?>(reader, "reflected_p_w")),
-                            DeliveredP_W = ToDouble(GetValue<decimal?>(reader, "delivered_p_w"))
+                            DeliveredP_W = ToDouble(GetValue<decimal?>(reader, "delivered_p_w")),
+                            Ar_Flow = ToDouble(steps[i].ArFlow),
+                            O2_Flow = ToDouble(steps[i].O2Flow),
+                            APC_Pressure = ToDouble(steps[i].ApcPressure),
+                            APC_Position = ToDouble(steps[i].ApcPosition),
+                            VVC1 = ToDouble(steps[i].Vvc1),
+                            VVC2 = ToDouble(steps[i].Vvc2),
+                            VVC3 = ToDouble(steps[i].Vvc3),
+                            Proc_Status = steps[i].ProcStatus switch
+                            {
+                                null => string.Empty,
+                                0 => "Process Run 정상",
+                                1 => "Heavy alarm",
+                                _ => "Unknown"
+                            },
+
                         });
+
+                        i++;
                     }
                 }
             }

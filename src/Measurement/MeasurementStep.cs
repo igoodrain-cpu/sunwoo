@@ -5,6 +5,7 @@
 // ════════════════════════════════════════════════════════════════
 using System;
 using System.Numerics;
+using static System.Windows.Forms.VisualStyles.VisualStyleElement;
 
 namespace Iruza
 {
@@ -33,6 +34,23 @@ namespace Iruza
         public double ForwardP_W   { get; set; }
         public double ReflectedP_W { get; set; }
         public double DeliveredP_W { get; set; }
+
+        // ── GAS ──
+        public double Ar_Flow { get; set; }
+        public double O2_Flow { get; set; }
+
+        // ── 압력 ──
+        public double APC_Pressure { get; set; }
+        public double APC_Position { get; set; }
+
+        // ── 센서 ──
+        public double VVC1 { get; set; }
+        public double VVC2 { get; set; }
+        public double VVC3 { get; set; }
+
+        // ── process 상태 ──
+        public string Proc_Status { get; set; } = "";
+
 
         // ── 파생 프로퍼티 (저장 불필요) ──
         public double GammaMag     => Math.Sqrt(Gamma_Real * Gamma_Real + Gamma_Imag * Gamma_Imag);

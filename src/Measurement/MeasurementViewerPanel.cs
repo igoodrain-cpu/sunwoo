@@ -235,7 +235,7 @@ namespace Iruza
         }
 
         // [ADD] 현재 활성 데이터셋을 리스트에서 제거
-        void RemoveDataset()
+        public void RemoveDataset()
         {
             if (_activeDsIndex < 0 || _activeDsIndex >= _dsList.Count) return;
             int removed = _activeDsIndex;
@@ -252,6 +252,52 @@ namespace Iruza
             if (_selectedDsIndices.Count == 0) _selectedDsIndices.Add(0);
 
             _activeDsIndex = Math.Min(removed, _dsList.Count - 1);
+            RefreshDatasetList();
+            RefreshAll();
+        }
+
+        /// <summary>
+        ///  모든 데이터 삭제
+        /// </summary>
+        public void RemoveAtDatasets(int i, string pName)
+        {
+            //_dsList.Clear();
+
+            if (i == 0)
+            {
+                pName = pName + "_source";
+            }
+            else
+            {
+                pName = pName + "_bias";
+            }
+
+
+            foreach (MeasurementDataset dataset in _dsList)
+            {
+                string name = dataset.Name;
+                if (name == pName)
+                {
+                    _dsList.Remove(dataset);
+                    break;
+                }
+            }
+  
+            _activeDsIndex = _dsList.Count - 1;
+
+            RefreshDatasetList();
+            RefreshAll();
+        }
+
+        /// <summary>
+        ///  모든 데이터 삭제
+        /// </summary>
+        public void RemoveAllDatasets()
+        {
+            _dsList.Clear();
+            _selectedDsIndices.Clear();
+            _activeDsIndex = -1;
+
             RefreshDatasetList();
             RefreshAll();
         }
@@ -489,15 +535,19 @@ namespace Iruza
             };
 
             var cols = new[]{
-                ("Step","#",true),("Vout_Vrms","Vout\nVrms",false),
-                ("Iout_Arms","Iout\nArms",false),("Phase_deg","θ\ndeg",false),
-                ("R","R Ω",false),("X","X Ω",false),
+                ("Step","#",true),("Vout_Vrms","Vout\nVrms",true),
+                ("Iout_Arms","Iout\nArms",true),("Phase_deg","θ\ndeg",true),
+                ("R","R Ω",true),("X","X Ω",true),
                 ("Gamma_Real","Γ real",true),("Gamma_Imag","Γ imag",true),
                 ("GammaMag","|Γ|",true),("VSWR","VSWR",true),
                 ("Z_Text","Z",true),("Z_Normalized","z norm",true),
-                ("ForwardP_W","Fwd W",false),("ReflectedP_W","Ref W",false),
-                ("DeliveredP_W","Del W",false),("ReturnLoss_dB","RL dB",true),
-                ("Efficiency_pct","η %",true),
+                ("ForwardP_W","Fwd W",true),("ReflectedP_W","Ref W",true),
+                ("DeliveredP_W","Del W",true),("ReturnLoss_dB","RL dB",true),
+                ("Efficiency_pct","η %",true),("Ar_Flow","Ar",true),
+                ("O2_Flow","O2",true),("APC_Pressure","APC Pre",true),
+                ("APC_Position","APC Pos",true),("VVC1","VVC1",true),
+                ("VVC2","VVC2",true),("VVC3","VVC3",true),
+                ("Proc_Status","Proc Status",true)
             };
             foreach (var (n, h, ro) in cols)
                 g.Columns.Add(new DataGridViewTextBoxColumn
@@ -532,7 +582,8 @@ namespace Iruza
                     s.Z_Text, s.Z_Normalized,
                     s.ForwardP_W.ToString("F4"), s.ReflectedP_W.ToString("F4"),
                     s.DeliveredP_W.ToString("F4"), s.ReturnLoss_dB.ToString("F2"),
-                    s.Efficiency_pct.ToString("F1")
+                    s.Efficiency_pct.ToString("F1"),s.Ar_Flow.ToString("F1"), s.O2_Flow.ToString("F1"),
+                    s.APC_Pressure.ToString("F2"), s.APC_Position.ToString("F2"), s.VVC1.ToString("F2"), s.VVC2.ToString("F2"), s.VVC3.ToString("F2"),s.Proc_Status
                 );
                 var row = _grid.Rows[_grid.Rows.Count - 1];
                 Color vc = s.VSWR < 1.5
@@ -588,6 +639,14 @@ namespace Iruza
                     ms.ForwardP_W = d;
                     ms.ReflectedP_W = ms.ForwardP_W * ms.GammaMag * ms.GammaMag; break;
                 case "DeliveredP_W": ms.DeliveredP_W = d; break;
+                case "Ar_Flow": ms.Ar_Flow = d; break;
+                case "O2_Flow": ms.O2_Flow = d; break;
+                case "APC_Pressure": ms.APC_Pressure = d; break;
+                case "APC_Position": ms.APC_Position = d; break;
+                case "VVC1": ms.VVC1 = d; break;
+                case "VVC2": ms.VVC2 = d; break;
+                case "VVC3": ms.VVC3 = d; break;
+                //case "Proc_Status": ms.Proc_Status = d; break;
             }
             RefreshAll();
         }
@@ -608,7 +667,7 @@ namespace Iruza
             RefreshAll();
         }
 
-        void DeleteSelected()
+        public void DeleteSelected()
         {
             if (_ds == null || _grid.SelectedRows.Count == 0) return;
             int idx = _grid.SelectedRows[0].Index;
@@ -863,6 +922,13 @@ namespace Iruza
                 $"Del = {s.DeliveredP_W:F2} W",
                 $"η = {s.Efficiency_pct:F1}%",
                 $"Reflected = {s.ReflectedP_W:F1} W",
+                $"ArFlow = {s.Ar_Flow:F2} sccm",
+                $"O2Flow = {s.O2_Flow:F2} sccm",
+                $"APC Pressure = {s.APC_Pressure:F2} Torr",
+                $"APC Position = {s.APC_Position:F2} %",
+                $"VVC1 = {s.VVC1:F2} pF",
+                $"VVC2 = {s.VVC2:F2} pF",
+                $"VVC3 = {s.VVC3:F2} pF"
             };
             var f = new Font("Consolas", 7.5f);
             float fw = lines.Max(l => g.MeasureString(l, f).Width) + 10, fh = lines.Length * 13f + 8;

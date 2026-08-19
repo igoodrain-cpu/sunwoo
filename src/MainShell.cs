@@ -293,16 +293,19 @@ namespace Iruza
             };
             btnSearch.Click += (s, e) =>
             {
+                bool iflag = false;
+                
                 _processRecord = new List<ProcessRunRecord>();
 
-                
-
+               
                 foreach (TreeNode node in _root.Nodes)
                 {
                     string name = node.Text;
                     // Console.WriteLine(name);
                     if (node.Checked)
                     {
+                        iflag = true;
+
                         ProcessRunRecord iprocessRunRecord = new ProcessRunRecord();
                         iprocessRunRecord = MeasurementDb.GetProcessRunByName(name);
 
@@ -313,22 +316,36 @@ namespace Iruza
 
 
                             MeasurementDataset iSmeasurementDataset = new MeasurementDataset();
-                            iSmeasurementDataset = MeasurementDb.GetMeasurementDatasetByRunId(iprocessRunRecord.RunId, "source", 50);
+                            iSmeasurementDataset = MeasurementDb.GetMeasurementDatasetByRunId(iprocessRunRecord.RunId, "source", 50, iProcessStepRecord);
 
                             MeasurementDataset iBmeasurementDataset = new MeasurementDataset();
-                            iBmeasurementDataset = MeasurementDb.GetMeasurementDatasetByRunId(iprocessRunRecord.RunId, "bias", 50);
+                            iBmeasurementDataset = MeasurementDb.GetMeasurementDatasetByRunId(iprocessRunRecord.RunId, "bias", 50, iProcessStepRecord);
 
                             _sourcePanel.OverlappedChartDisplay(0, _root, name, iSmeasurementDataset);
                             _biasPanel.OverlappedChartDisplay(1, _root, name, iBmeasurementDataset);
 
                         }
 
+
                        // _sourcePanel.OverlappedChart(0, _root, name);
                        // _biasPanel.OverlappedChart(1, _root, name);
                     }
-                        
+                    else
+                    {
+                        _sourcePanel.RemoveAtDatasets(0, name);
+                        _biasPanel.RemoveAtDatasets(1, name);
+                    }
+
                 }
 
+                if(iflag == false)
+                {
+                    MessageBox.Show("선택된 항목이 없습니다.", "검색",
+                    MessageBoxButtons.OK, MessageBoxIcon.Information);
+
+                    _sourcePanel.RemoveAllDatasets();
+                    _biasPanel.RemoveAllDatasets();
+                }
 
                 _processRecord = MeasurementDb.GetProcessRuns();
 
