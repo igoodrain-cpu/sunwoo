@@ -11,7 +11,7 @@ namespace MeasurementImporterService.Services;
 /// </summary>
 public sealed class CsvParserService
 {
-    private const int ExpectedColumnCount = 62;
+    private const int ExpectedColumnCount = 34;
 
     public async Task<string> ComputeFileHashAsync(string filePath, CancellationToken cancellationToken)
     {
@@ -130,8 +130,8 @@ public sealed class CsvParserService
     {
         var logDate = ParseDate(c[0]);
         var logTime = ParseTime(c[1]);
-        var sourcePoint = ParseSmithChartPoint(c, 34, RfChannel.Source);
-        var biasPoint = ParseSmithChartPoint(c, 48, RfChannel.Bias);
+        var sourcePoint = ParseSmithChartPointS(c, RfChannel.Source);
+        var biasPoint = ParseSmithChartPointB(c, RfChannel.Bias);
 
         return new ProcessStepRecord
         {
@@ -174,31 +174,116 @@ public sealed class CsvParserService
         };
     }
 
-    private static SmithChartPointRecord ParseSmithChartPoint(IReadOnlyList<string> c, int startIndex, RfChannel channel)
+    private static SmithChartPointRecord ParseSmithChartPointS(IReadOnlyList<string> c, RfChannel channel)
     {
-        var gammaMag = ParseDecimalOrNull(c[startIndex + 7]);
-        var forwardPower = ParseDecimalOrNull(c[startIndex + 11]);
-        var reflectedPower = ParseDecimalOrNull(c[startIndex + 12]);
-        var deliveredPower = ParseDecimalOrNull(c[startIndex + 13]);
+
+        //var gammaMag = ParseDecimalOrNull(c[startIndex + 7]);
+        var forwardPower = ParseDecimalOrNull(c[5]);
+        var reflectedPower = ParseDecimalOrNull(c[6]);
+        var deliveredPower = ParseDecimalOrNull(c[10]);
+
+        double z0 = 50.0;
+        double r = CalcR(vrms: Convert.ToDouble(ParseDecimalOrNull(c[7]) ?? 0m),irms: Convert.ToDouble(ParseDecimalOrNull(c[8]) ?? 0m),phaseDeg: Convert.ToDouble(ParseDecimalOrNull(c[9]) ?? 0m));
+        double x = CalcX(vrms: Convert.ToDouble(ParseDecimalOrNull(c[7]) ?? 0m), irms: Convert.ToDouble(ParseDecimalOrNull(c[8]) ?? 0m), phaseDeg: Convert.ToDouble(ParseDecimalOrNull(c[9]) ?? 0m));
+        double gammaReal = CalcGammaReal(r, x, z0);
+        double gammaImag = CalcGammaImag(r, x, z0);
+        double gammaMag = CalcGammaMag(gammaReal, gammaImag);
+        double vswr = CalcVSWR(gammaMag);
+
+        string zText = CalcZText(r, x);
+        string zNormalized = CalcZNormalized(r, x, z0);
 
         return new SmithChartPointRecord
         {
             Channel = channel,
-            VoutVrms = ParseDecimalOrNull(c[startIndex]),
-            IoutArms = ParseDecimalOrNull(c[startIndex + 1]),
-            PhaseDeg = ParseDecimalOrNull(c[startIndex + 2]),
-            ROhm = ParseDecimalOrNull(c[startIndex + 3]),
-            XOhm = ParseDecimalOrNull(c[startIndex + 4]),
-            GammaReal = ParseDecimalOrNull(c[startIndex + 5]),
-            GammaImag = ParseDecimalOrNull(c[startIndex + 6]),
-            GammaMag = gammaMag,
-            Vswr = ParseDecimalOrNull(c[startIndex + 8]),
-            ZText = TrimToLength(NullIfEmpty(c[startIndex + 9]), 40),
-            ZNormalized = TrimToLength(NullIfEmpty(c[startIndex + 10]), 40),
+            VoutVrms = ParseDecimalOrNull(c[7]),
+            IoutArms = ParseDecimalOrNull(c[8]),
+            PhaseDeg = ParseDecimalOrNull(c[9]),
+
+           // ROhm = ParseDecimalOrNull(c[startIndex + 3]),
+           // XOhm = ParseDecimalOrNull(c[startIndex + 4]),
+           // GammaReal = ParseDecimalOrNull(c[startIndex + 5]),
+           // GammaImag = ParseDecimalOrNull(c[startIndex + 6]),
+           // GammaMag = gammaMag,
+           // Vswr = ParseDecimalOrNull(c[startIndex + 8]),
+
+            ROhm = Convert.ToDecimal(r),
+            XOhm = Convert.ToDecimal(x),
+            GammaReal = Convert.ToDecimal(gammaReal),
+            GammaImag = Convert.ToDecimal(gammaImag),
+            GammaMag = Convert.ToDecimal(gammaMag),
+            Vswr = Convert.ToDecimal(vswr),
+
+            //ZText = TrimToLength(NullIfEmpty(c[startIndex + 9]), 40),
+            //ZNormalized = TrimToLength(NullIfEmpty(c[startIndex + 10]), 40),
+
+            ZText = zText,
+            ZNormalized = zNormalized,
+
             ForwardPowerW = forwardPower,
             ReflectedPowerW = reflectedPower,
             DeliveredPowerW = deliveredPower,
-            ReturnLossDb = ComputeReturnLossDb(gammaMag, forwardPower, reflectedPower),
+            ReturnLossDb = ComputeReturnLossDb(Convert.ToDecimal(gammaMag), forwardPower, reflectedPower),
+            EfficiencyPct = ComputeEfficiencyPct(forwardPower, deliveredPower)
+        };
+    }
+
+    private static SmithChartPointRecord ParseSmithChartPointB(IReadOnlyList<string> c, RfChannel channel)
+    {
+        //var gammaMag = ParseDecimalOrNull(c[startIndex + 7]);
+        //var forwardPower = ParseDecimalOrNull(c[startIndex + 11]);
+        //var reflectedPower = ParseDecimalOrNull(c[startIndex + 12]);
+        //var deliveredPower = ParseDecimalOrNull(c[startIndex + 13]);
+        var forwardPower = ParseDecimalOrNull(c[16]);
+        var reflectedPower = ParseDecimalOrNull(c[17]);
+        var deliveredPower = ParseDecimalOrNull(c[21]);
+
+
+        double z0 = 50.0;
+        double r = CalcR(vrms: Convert.ToDouble(ParseDecimalOrNull(c[18]) ?? 0m), irms: Convert.ToDouble(ParseDecimalOrNull(c[19]) ?? 0m), phaseDeg: Convert.ToDouble(ParseDecimalOrNull(c[20]) ?? 0m));
+        double x = CalcX(vrms: Convert.ToDouble(ParseDecimalOrNull(c[18]) ?? 0m), irms: Convert.ToDouble(ParseDecimalOrNull(c[19]) ?? 0m), phaseDeg: Convert.ToDouble(ParseDecimalOrNull(c[20]) ?? 0m));
+        double gammaReal = CalcGammaReal(r, x, z0);
+        double gammaImag = CalcGammaImag(r, x, z0);
+        double gammaMag = CalcGammaMag(gammaReal, gammaImag);
+        double vswr = CalcVSWR(gammaMag);
+
+        string zText = CalcZText(r, x);
+        string zNormalized = CalcZNormalized(r, x, z0);
+
+        return new SmithChartPointRecord
+        {
+            Channel = channel,
+            //VoutVrms = ParseDecimalOrNull(c[startIndex]),
+            //IoutArms = ParseDecimalOrNull(c[startIndex + 1]),
+            //PhaseDeg = ParseDecimalOrNull(c[startIndex + 2]),
+            VoutVrms = ParseDecimalOrNull(c[18]),
+            IoutArms = ParseDecimalOrNull(c[19]),
+            PhaseDeg = ParseDecimalOrNull(c[20]),
+
+            //ROhm = ParseDecimalOrNull(c[startIndex + 3]),
+            //XOhm = ParseDecimalOrNull(c[startIndex + 4]),
+            //GammaReal = ParseDecimalOrNull(c[startIndex + 5]),
+            // GammaImag = ParseDecimalOrNull(c[startIndex + 6]),
+            //GammaMag = Convert.ToDecimal(gammaMag),
+            //Vswr = ParseDecimalOrNull(c[startIndex + 8]),
+
+            ROhm = Convert.ToDecimal(r),
+            XOhm = Convert.ToDecimal(x),
+            GammaReal = Convert.ToDecimal(gammaReal),
+            GammaImag = Convert.ToDecimal(gammaImag),
+            GammaMag = Convert.ToDecimal(gammaMag),
+            Vswr = Convert.ToDecimal(vswr),
+
+           // ZText = TrimToLength(NullIfEmpty(c[startIndex + 9]), 40),
+           // ZNormalized = TrimToLength(NullIfEmpty(c[startIndex + 10]), 40),
+
+            ZText = zText,
+            ZNormalized = zNormalized,
+
+            ForwardPowerW = forwardPower,
+            ReflectedPowerW = reflectedPower,
+            DeliveredPowerW = deliveredPower,
+            ReturnLossDb = ComputeReturnLossDb(Convert.ToDecimal(gammaMag), forwardPower, reflectedPower),
             EfficiencyPct = ComputeEfficiencyPct(forwardPower, deliveredPower)
         };
     }
@@ -354,5 +439,140 @@ public sealed class CsvParserService
     {
         var hash = SHA256.HashData(data);
         return Convert.ToHexString(hash);
+    }
+
+    /// <summary>
+    /// V(rms), I(rms), 위상각(deg)으로부터 임피던스의 실수부(R)를 계산합니다.
+    /// Z = (V/I) * (cosθ + j sinθ)  →  R = (V/I) * cosθ
+    /// </summary>
+    /// <param name="vrms">전압 실효값 (V)</param>
+    /// <param name="irms">전류 실효값 (A)</param>
+    /// <param name="phaseDeg">전압-전류 위상차 (degree)</param>
+    public static double CalcR(double vrms, double irms, double phaseDeg)
+    {
+        if (irms == 0) return 0d;
+
+        double magnitude = vrms / irms;
+        double phaseRad = phaseDeg * Math.PI / 180.0;
+
+        return magnitude * Math.Cos(phaseRad);
+    }
+
+    /// <summary>
+    /// V(rms), I(rms), 위상각(deg)으로부터 임피던스의 허수부(X)를 계산합니다.
+    /// Z = (V/I) * (cosθ + j sinθ)  →  X = (V/I) * sinθ
+    /// </summary>
+    /// <param name="vrms">전압 실효값 (V)</param>
+    /// <param name="irms">전류 실효값 (A)</param>
+    /// <param name="phaseDeg">전압-전류 위상차 (degree)</param>
+    public static double CalcX(double vrms, double irms, double phaseDeg)
+    {
+        if (irms == 0) return 0d;
+
+        double magnitude = vrms / irms;
+        double phaseRad = phaseDeg * Math.PI / 180.0;
+
+        return magnitude * Math.Sin(phaseRad);
+    }
+
+    /// <summary>
+    /// 임피던스(R, X)와 기준 임피던스(Z0)로부터 반사계수의 실수부(Γreal)를 계산합니다.
+    /// Γ = (Z - Z0) / (Z + Z0),  Z = R + jX
+    /// </summary>
+    /// <param name="r">임피던스 실수부 R (Ω)</param>
+    /// <param name="x">임피던스 허수부 X (Ω)</param>
+    /// <param name="z0">기준 임피던스 (보통 50Ω)</param>
+    public static double CalcGammaReal(double r, double x, double z0)
+    {
+        // 분자: (R - Z0) + jX
+        double numReal = r - z0;
+        double numImag = x;
+
+        // 분모: (R + Z0) + jX
+        double denReal = r + z0;
+        double denImag = x;
+
+        double denomSq = denReal * denReal + denImag * denImag;
+        if (denomSq == 0) return 0d;
+
+        // 복소수 나눗셈: (a+jb)/(c+jd) = [(ac+bd) + j(bc-ad)] / (c²+d²)
+        return (numReal * denReal + numImag * denImag) / denomSq;
+    }
+
+    /// <summary>
+    /// 임피던스(R, X)와 기준 임피던스(Z0)로부터 반사계수의 허수부(Γimag)를 계산합니다.
+    /// Γ = (Z - Z0) / (Z + Z0),  Z = R + jX
+    /// </summary>
+    /// <param name="r">임피던스 실수부 R (Ω)</param>
+    /// <param name="x">임피던스 허수부 X (Ω)</param>
+    /// <param name="z0">기준 임피던스 (보통 50Ω)</param>
+    public static double CalcGammaImag(double r, double x, double z0)
+    {
+        double numReal = r - z0;
+        double numImag = x;
+
+        double denReal = r + z0;
+        double denImag = x;
+
+        double denomSq = denReal * denReal + denImag * denImag;
+        if (denomSq == 0) return 0d;
+
+        return (numImag * denReal - numReal * denImag) / denomSq;
+    }
+
+    /// <summary>
+    /// 반사계수의 실수부/허수부로부터 크기 |Γ|를 계산합니다.
+    /// |Γ| = sqrt(Γreal² + Γimag²)
+    /// </summary>
+    /// <param name="gammaReal">반사계수 실수부</param>
+    /// <param name="gammaImag">반사계수 허수부</param>
+    public static double CalcGammaMag(double gammaReal, double gammaImag)
+    {
+        return Math.Sqrt(gammaReal * gammaReal + gammaImag * gammaImag);
+    }
+
+    /// <summary>
+    /// 반사계수 크기(|Γ|)로부터 VSWR을 계산합니다.
+    /// VSWR = (1 + |Γ|) / (1 - |Γ|)
+    /// </summary>
+    /// <param name="gammaMag">반사계수 크기 (0~1)</param>
+    public static double CalcVSWR(double gammaMag)
+    {
+        // |Γ| = 1이면 완전 반사(분모 0) → VSWR 발산 방지용 클램프
+        const double epsilon = 1e-6;
+        double clamped = Math.Min(gammaMag, 1 - epsilon);
+
+        return (1 + clamped) / (1 - clamped);
+    }
+
+    /// <summary>
+    /// 임피던스 R, X로부터 사람이 읽기 좋은 형태의 Z 텍스트를 생성합니다.
+    /// 예: R=75.20, X=-50.30 → "75.20 - j50.30 Ω"
+    /// </summary>
+    /// <param name="r">임피던스 실수부 R (Ω)</param>
+    /// <param name="x">임피던스 허수부 X (Ω)</param>
+    public static string CalcZText(double r, double x)
+    {
+        string sign = x >= 0 ? "+" : "-";
+        return $"{r:F2} {sign} j{Math.Abs(x):F2} Ω";
+    }
+
+    /// <summary>
+    /// 임피던스 R, X를 기준 임피던스 Z0로 정규화한 텍스트를 생성합니다.
+    /// z = Z / Z0 = (R/Z0) + j(X/Z0)
+    /// 예: R=75.20, X=-50.30, Z0=50 → "1.504 - j1.006"
+    /// </summary>
+    /// <param name="r">임피던스 실수부 R (Ω)</param>
+    /// <param name="x">임피던스 허수부 X (Ω)</param>
+    /// <param name="z0">기준 임피던스 (보통 50Ω)</param>
+    public static string CalcZNormalized(double r, double x, double z0)
+    {
+        if (z0 == 0) return string.Empty;
+
+        double zr = r / z0;
+        double zx = x / z0;
+        string sign = zx >= 0 ? "+" : "-";
+
+        return $"{zr:F3} {sign} j{Math.Abs(zx):F3}";
     }
 }
