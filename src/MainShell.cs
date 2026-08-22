@@ -11,6 +11,7 @@ using System.Drawing;
 using System.IO;
 using System.Windows.Forms;
 using System.Xml.Linq;
+//using Iruza.Anomaly;
 using Iruza.src.Parameter;
 
 namespace Iruza
@@ -286,7 +287,7 @@ namespace Iruza
             // [ADD] 트리 밑에 붙일 검색 버튼
             var btnSearch = new Button
             {
-                Text = "검색",
+                Text = "VIEW",
                 Dock = DockStyle.Bottom,
                 Height = 32,
                 Font = new Font("Malgun Gothic", 9.5f)
@@ -309,7 +310,9 @@ namespace Iruza
                         ProcessRunRecord iprocessRunRecord = new ProcessRunRecord();
                         iprocessRunRecord = MeasurementDb.GetProcessRunByName(name);
 
-                        if(iprocessRunRecord != null)
+                        Demo itest = new Demo();
+
+                        if (iprocessRunRecord != null)
                         {
                             List<ProcessStepRecord> iProcessStepRecord = new List<ProcessStepRecord>();
                             iProcessStepRecord = MeasurementDb.GetProcessStepsByRunId(iprocessRunRecord.RunId);
@@ -321,14 +324,26 @@ namespace Iruza
                             MeasurementDataset iBmeasurementDataset = new MeasurementDataset();
                             iBmeasurementDataset = MeasurementDb.GetMeasurementDatasetByRunId(iprocessRunRecord.RunId, "bias", 50, iProcessStepRecord);
 
-                            _sourcePanel.OverlappedChartDisplay(0, _root, name, iSmeasurementDataset);
-                            _biasPanel.OverlappedChartDisplay(1, _root, name, iBmeasurementDataset);
+                            List<ImpedanceStepData> iSImpedanceStepData = new List<ImpedanceStepData>();
+                            //string iSourceStatus = "";
+                            List<ImpedanceStepData> iBImpedanceStepData = new List<ImpedanceStepData>();
+                            //string iBourceStatus = "";
+
+                            iSImpedanceStepData = MeasurementDb.GetImpedanceStepsByRunId(iprocessRunRecord.RunId, "source");
+                            iBImpedanceStepData = MeasurementDb.GetImpedanceStepsByRunId(iprocessRunRecord.RunId, "bias");
+
+                            //iSourceStatus
+                            string iSourceStatus = itest.Run(iSImpedanceStepData);
+                            string iBourceStatus = itest.Run(iBImpedanceStepData);
+
+                            _sourcePanel.OverlappedChartDisplay(0, _root, name, iSmeasurementDataset, iSourceStatus);
+                            _biasPanel.OverlappedChartDisplay(1, _root, name, iBmeasurementDataset, iBourceStatus);
+
 
                         }
 
-
-                       // _sourcePanel.OverlappedChart(0, _root, name);
-                       // _biasPanel.OverlappedChart(1, _root, name);
+                        // _sourcePanel.OverlappedChart(0, _root, name);
+                        // _biasPanel.OverlappedChart(1, _root, name);
                     }
                     else
                     {

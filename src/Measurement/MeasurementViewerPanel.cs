@@ -72,9 +72,10 @@ namespace Iruza
         }
 
 
-        public void OverlappedChartDisplay(int i, TreeNode root, string pName, MeasurementDataset pMeasurementDataset)
+        public void OverlappedChartDisplay(int i, TreeNode root, string pName, MeasurementDataset pMeasurementDataset, string pStatus)
         {
             BackColor = Color.White;
+            int j = 0;
 
 
             if(i == 0)
@@ -116,6 +117,7 @@ namespace Iruza
                 _dsList = new List<MeasurementDataset> { initial };
                 _activeDsIndex = 0;
                 _selectedDsIndices = new List<int> { 0 };
+
             }
             else
             {
@@ -129,6 +131,17 @@ namespace Iruza
             //AddDataset(new MeasurementDataset { Z0 = 50, Name = pName });
 
             //BuildLayout();
+
+            if (pStatus == "NORMAL")
+            {
+                _dsList[_dsList.Count - 1].Name = _dsList[_dsList.Count - 1].Name + "(NORMAL)";
+
+            }
+            else
+            {
+                _dsList[_dsList.Count - 1].Name = _dsList[_dsList.Count - 1].Name + "(ABNORMAL)";
+            }
+
             RefreshDatasetList();
             RefreshAll();
         }

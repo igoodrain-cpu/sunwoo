@@ -94,6 +94,57 @@ namespace Iruza
             return new NpgsqlConnection(connectionString);
         }
 
+        /// <summary>
+        /// 특정 run_id, channel(Source/Bias)에 대한 스미스 차트 포인트를 조회하여
+        /// ImpedanceAnomalyDetector에서 바로 사용할 수 있는 ImpedanceStepData 리스트로 반환합니다.
+        /// </summary>
+        /// <param name="runId">process_run.run_id</param>
+        /// <param name="channel">"source" 또는 "bias" 등 channel 값 (null이면 전체 채널)</param>
+        public static List<ImpedanceStepData> GetImpedanceStepsByRunId(long runId, string channel = null)
+        {
+            var sql = @"
+SELECT s.step_num,
+       p.r_ohm, p.x_ohm, p.vout_vrms, p.iout_arms, p.vswr
+FROM smith_chart_point p
+INNER JOIN process_step s ON s.step_id = p.step_id
+WHERE s.run_id = @run_id";
+
+            if (!string.IsNullOrWhiteSpace(channel))
+                sql += " AND p.channel::text = @channel";
+
+            sql += " ORDER BY s.step_num ASC, p.point_id ASC;";
+
+            var result = new List<ImpedanceStepData>();
+
+            using (var conn = CreateConnection())
+            using (var cmd = new NpgsqlCommand(sql, conn))
+            {
+                cmd.Parameters.AddWithValue("run_id", runId);
+                if (!string.IsNullOrWhiteSpace(channel))
+                    cmd.Parameters.AddWithValue("channel", channel);
+
+                conn.Open();
+
+                using (var reader = cmd.ExecuteReader())
+                {
+                    while (reader.Read())
+                    {
+                        result.Add(new ImpedanceStepData
+                        {
+                            Step = Convert.ToInt32(GetValue<short>(reader, "step_num")),
+                            R = ToDouble(GetValue<decimal?>(reader, "r_ohm")),
+                            X = ToDouble(GetValue<decimal?>(reader, "x_ohm")),
+                            Vout = ToDouble(GetValue<decimal?>(reader, "vout_vrms")),
+                            Iout = ToDouble(GetValue<decimal?>(reader, "iout_arms")),
+                            VSWR = ToDouble(GetValue<decimal?>(reader, "vswr"))
+                        });
+                    }
+                }
+            }
+
+            return result;
+        }
+
         public static List<string> GetProcessRunNames(DateTime? startTime = null, DateTime? endTime = null)
         {
             var sql = @"
@@ -119,6 +170,102 @@ WHERE 1 = 1";
 
                 if (endTime.HasValue)
                     cmd.Parameters.AddWithValue("end_time", endTime.Value);
+
+                conn.Open();
+
+                using (var reader = cmd.ExecuteReader())
+                {
+                    while (reader.Read())
+                    {
+                        result.Add(GetString(reader, "run_name"));
+                    }
+                }
+            }
+
+            return result;
+        }
+
+        /// <summary>
+        /// Recipe name(부분일치), Step, Power(전달전력), 기간(startTime~endTime) 조건으로
+        /// process_run을 검색하여 조건에 맞는 run_name 목록을 반환합니다.
+        /// </summary>
+        /// <param name="recipeName">Recipe name 부분 검색어 (null/빈 값이면 전체 대상)</param>
+        /// <param name="stepNum">특정 Step 번호로 제한 (null이면 전체 Step)</param>
+        /// <param name="minPower">전달 전력(delivered_p_w) 하한 (null이면 제한 없음)</param>
+        /// <param name="maxPower">전달 전력(delivered_p_w) 상한 (null이면 제한 없음)</param>
+        /// <param name="startTime">started_at 하한 (null이면 제한 없음)</param>
+        /// <param name="endTime">ended_at 상한 (null이면 제한 없음)</param>
+        public static List<string> SearchProcessRunNames(
+            string recipeName = null,
+            short? stepNum = null,
+            decimal? minPower = null,
+            decimal? maxPower = null,
+            DateTime? startTime = null,
+            DateTime? endTime = null)
+        {
+            var sql = @"
+SELECT DISTINCT r.run_name, r.created_at
+FROM process_run r";
+
+            // Step 또는 Power 조건이 있을 때만 process_step / smith_chart_point 조인
+            var needsStepJoin = stepNum.HasValue || minPower.HasValue || maxPower.HasValue;
+
+            if (needsStepJoin)
+            {
+                sql += @"
+INNER JOIN process_step s ON s.run_id = r.run_id";
+
+                if (minPower.HasValue || maxPower.HasValue)
+                {
+                    sql += @"
+INNER JOIN smith_chart_point p ON p.step_id = s.step_id";
+                }
+            }
+
+            sql += " WHERE 1 = 1";
+
+            if (!string.IsNullOrWhiteSpace(recipeName))
+                sql += " AND r.recipe_name ILIKE @recipe_name";
+
+            if (startTime.HasValue)
+                sql += " AND r.started_at >= @start_time";
+
+            if (endTime.HasValue)
+                sql += " AND r.ended_at <= @end_time";
+
+            if (stepNum.HasValue)
+                sql += " AND s.step_num = @step_num";
+
+            if (minPower.HasValue)
+                sql += " AND p.delivered_p_w >= @min_power";
+
+            if (maxPower.HasValue)
+                sql += " AND p.delivered_p_w <= @max_power";
+
+            sql += " ORDER BY r.created_at DESC, r.run_name ASC;";
+
+            var result = new List<string>();
+
+            using (var conn = CreateConnection())
+            using (var cmd = new NpgsqlCommand(sql, conn))
+            {
+                if (!string.IsNullOrWhiteSpace(recipeName))
+                    cmd.Parameters.AddWithValue("recipe_name", $"%{recipeName}%");
+
+                if (startTime.HasValue)
+                    cmd.Parameters.AddWithValue("start_time", startTime.Value);
+
+                if (endTime.HasValue)
+                    cmd.Parameters.AddWithValue("end_time", endTime.Value);
+
+                if (stepNum.HasValue)
+                    cmd.Parameters.AddWithValue("step_num", stepNum.Value);
+
+                if (minPower.HasValue)
+                    cmd.Parameters.AddWithValue("min_power", minPower.Value);
+
+                if (maxPower.HasValue)
+                    cmd.Parameters.AddWithValue("max_power", maxPower.Value);
 
                 conn.Open();
 
