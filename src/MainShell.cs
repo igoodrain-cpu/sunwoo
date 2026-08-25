@@ -34,7 +34,7 @@ namespace Iruza
 
         ParameterForm _ParaDlg;
 
-        List<ProcessRunRecord> _processRecord;
+        //List<ProcessRunRecord> _processRecord;
 
         private sealed class LoadedRunData
         {
@@ -79,6 +79,13 @@ namespace Iruza
             WindowState = FormWindowState.Maximized;   // 기동 시 모니터 전체 채움
             BackColor = Color.White;
             Font = new Font("Malgun Gothic", 9f);
+
+            var iconBytes = Properties.Resources.RF_Impedance_Analyzer;
+            if (iconBytes != null && iconBytes.Length > 0)
+            {
+                using (var stream = new MemoryStream(iconBytes))
+                    this.Icon = new Icon(stream);
+            }
 
             _tree = new TreeView
             {
@@ -381,22 +388,7 @@ namespace Iruza
             _tree.AfterSelect += (s, e) =>
             {
                 if (e.Node == null || e.Node.Parent == null) return;
-
-                
-               // switch (e.Node.Text)
-               // {
-
-                switch (e.Node.Index)
-                {
-                    /// DB에서 Index의 Data를 가져와야 하는 부분 
-
-                    //case "Plasma Fingerprint 분석": _tabs.SelectedIndex = 0; break;
-                    ///case "20260727122030_normal": _tabs.SelectedIndex = 1; break;
-                  //  case 0: _tabs.SelectedIndex = 0; break;
-                  //  case 1: _tabs.SelectedIndex = 1; break;
-                        // case "20260727122030_normal1": _tabs.SelectedIndex = 1; break;
-                        // case "임피던스 매칭 계산기": _tabs.SelectedIndex = 2; break;
-                }
+               
             };
 
             _leftPanel = new Panel

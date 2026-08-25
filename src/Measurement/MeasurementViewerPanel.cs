@@ -75,7 +75,7 @@ namespace Iruza
         public void OverlappedChartDisplay(int i, TreeNode root, string pName, MeasurementDataset pMeasurementDataset, string pStatus)
         {
             BackColor = Color.White;
-            int j = 0;
+            //int j = 0;
 
 
             if(i == 0)

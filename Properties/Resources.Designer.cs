@@ -59,5 +59,15 @@ namespace Iruza.Properties {
                 resourceCulture = value;
             }
         }
+        
+        /// <summary>
+        ///   System.Byte[] 형식의 지역화된 리소스를 찾습니다.
+        /// </summary>
+        internal static byte[] RF_Impedance_Analyzer {
+            get {
+                object obj = ResourceManager.GetObject("RF_Impedance_Analyzer", resourceCulture);
+                return ((byte[])(obj));
+            }
+        }
     }
 }
