@@ -93,7 +93,7 @@ namespace Iruza
             foreach (MeasurementDataset dataset in _dsList)
             {
                 string name = dataset.Name;
-
+                name = name.Split('(')[0];
                 if (name == pName)
                 {
 
@@ -289,6 +289,7 @@ namespace Iruza
             foreach (MeasurementDataset dataset in _dsList)
             {
                 string name = dataset.Name;
+                name = name.Split('(')[0];
                 if (name == pName)
                 {
                     _dsList.Remove(dataset);

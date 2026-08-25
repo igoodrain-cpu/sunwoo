@@ -9,6 +9,8 @@ using System;
 using System.Collections.Generic;
 using System.Drawing;
 using System.IO;
+using System.Runtime.Remoting.Channels;
+using System.Threading.Tasks;
 using System.Windows.Forms;
 using System.Xml.Linq;
 //using Iruza.Anomaly;
@@ -22,6 +24,8 @@ namespace Iruza
         private TreeView _tree; 
 
         private Panel _leftPanel;
+        private Panel _loadingOverlay;
+        private Label _loadingLabel;
 
         private TreeNode _root;
 
@@ -30,7 +34,18 @@ namespace Iruza
 
         ParameterForm _ParaDlg;
 
-        List<ProcessRunRecord> _processRecord; 
+        List<ProcessRunRecord> _processRecord;
+
+        private sealed class LoadedRunData
+        {
+            public string Name { get; set; }
+            public MeasurementDataset SourceDataset { get; set; }
+            public MeasurementDataset BiasDataset { get; set; }
+            public string SourceStatus { get; set; }
+            public string BiasStatus { get; set; }
+        }
+
+        private bool _isCheckPropagating = false; // 재귀 호출/이벤트 중복 방지 플래그
 
         public MainShell()
         {
@@ -58,7 +73,7 @@ namespace Iruza
             BuildTree();   // [FIX] Dock=Left → 그 다음에 Controls.Add (탭 영역을 밀어냄)
             */
 
-            Text = "Iruza – RF Smith Chart Analyzer  |  H&iruja Inc.";
+            Text = "RF Impedance Analyzer ";
             MinimumSize = new Size(1000, 650);
             StartPosition = FormStartPosition.CenterScreen;
             WindowState = FormWindowState.Maximized;   // 기동 시 모니터 전체 채움
@@ -80,9 +95,117 @@ namespace Iruza
             BuildMenu();
             BuildTabs();   // Dock=Fill → 반드시 먼저 Controls.Add
             BuildTree();   // Dock=Left → 그 다음에 Controls.Add
+            BuildLoadingOverlay();
 
             _tree.AfterCheck += tree_AfterCheck;
 
+        }
+
+        void BuildLoadingOverlay()
+        {
+            _loadingOverlay = new Panel
+            {
+                Dock = DockStyle.Fill,
+                BackColor = Color.FromArgb(140, 255, 255, 255),
+                Visible = false
+            };
+
+            var loadingBox = new Panel
+            {
+                Size = new Size(220, 80),
+                BackColor = Color.White,
+                BorderStyle = BorderStyle.FixedSingle
+            };
+
+            _loadingLabel = new Label
+            {
+                Dock = DockStyle.Fill,
+                Text = "Loading...",
+                Font = new Font("Malgun Gothic", 11f, FontStyle.Bold),
+                TextAlign = ContentAlignment.MiddleCenter
+            };
+
+            loadingBox.Controls.Add(_loadingLabel);
+            _loadingOverlay.Controls.Add(loadingBox);
+            _loadingOverlay.Resize += (s, e) =>
+            {
+                loadingBox.Left = Math.Max(0, (_loadingOverlay.ClientSize.Width - loadingBox.Width) / 2);
+                loadingBox.Top = Math.Max(0, (_loadingOverlay.ClientSize.Height - loadingBox.Height) / 2);
+            };
+
+            Controls.Add(_loadingOverlay);
+            _loadingOverlay.BringToFront();
+        }
+
+        void ShowLoading(string message = "Loading...")
+        {
+            if (_loadingLabel != null)
+                _loadingLabel.Text = message;
+
+            if (_loadingOverlay != null)
+            {
+                _loadingOverlay.Visible = true;
+                _loadingOverlay.BringToFront();
+                _loadingOverlay.Update();
+            }
+
+            UseWaitCursor = true;
+            Cursor = Cursors.WaitCursor;
+        }
+
+        void HideLoading()
+        {
+            UseWaitCursor = false;
+            Cursor = Cursors.Default;
+
+            if (_loadingOverlay != null)
+                _loadingOverlay.Visible = false;
+        }
+
+        List<LoadedRunData> LoadCheckedRunData(List<string> checkedRunNames)
+        {
+            var result = new List<LoadedRunData>();
+            var detector = new Demo();
+
+            foreach (var name in checkedRunNames)
+            {
+                var processRun = MeasurementDb.GetProcessRunByName(name);
+                if (processRun == null)
+                    continue;
+
+                var processSteps = MeasurementDb.GetProcessStepsByRunId(processRun.RunId);
+                var sourceDataset = MeasurementDb.GetMeasurementDatasetByRunId(processRun.RunId, "source", 50, processSteps);
+                var biasDataset = MeasurementDb.GetMeasurementDatasetByRunId(processRun.RunId, "bias", 50, processSteps);
+
+                var sourceSteps = MeasurementDb.GetImpedanceStepsByRunId(processRun.RunId, "source");
+                var biasSteps = MeasurementDb.GetImpedanceStepsByRunId(processRun.RunId, "bias");
+
+                double sourceThreshold = Convert.ToDouble(MeasurementDb.GetActiveThreshold(processRun.RecipeName, "source"));
+                double biasThreshold = Convert.ToDouble(MeasurementDb.GetActiveThreshold(processRun.RecipeName, "bias"));
+
+
+                Demo itest = new Demo();
+
+                List<ImpedanceStepData> iSImpedanceStepData = new List<ImpedanceStepData>();
+                //string iSourceStatus = "";
+                List<ImpedanceStepData> iBImpedanceStepData = new List<ImpedanceStepData>();
+
+                //iSourceStatus
+               // string iSourceStatus = itest.Run(iSImpedanceStepData, 0.55, 0.45, sourceThreshold);
+               // string iBourceStatus = itest.Run(iBImpedanceStepData, 0.55, 0.45, biasThreshold);
+
+
+                result.Add(new LoadedRunData
+                {
+                    Name = name,
+                    SourceDataset = sourceDataset,
+                    BiasDataset = biasDataset,
+                    SourceStatus = detector.Run(sourceSteps, 0.55, 0.45, sourceThreshold),
+                    BiasStatus = detector.Run(biasSteps, 0.55, 0.45, biasThreshold)
+                });
+            }
+
+            return result;
         }
 
         // ── 메뉴바 ──
@@ -284,111 +407,193 @@ namespace Iruza
                 Padding = new Padding(6, 6, 4, 6)
             };
 
-            // [ADD] 트리 밑에 붙일 검색 버튼
+            var bottomButtonPanel = new TableLayoutPanel
+            {
+                Dock = DockStyle.Bottom,
+                Height = 32,
+                ColumnCount = 2,
+                RowCount = 1
+            };
+            bottomButtonPanel.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 50F));
+            bottomButtonPanel.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 50F));
+
+            // [ADD] 트리 밑에 붙일 VIEW 버튼
             var btnSearch = new Button
             {
                 Text = "VIEW",
-                Dock = DockStyle.Bottom,
-                Height = 32,
+                Dock = DockStyle.Fill,
                 Font = new Font("Malgun Gothic", 9.5f)
             };
-            btnSearch.Click += (s, e) =>
+            btnSearch.Click += async (s, e) =>
             {
-                bool iflag = false;
-                
-                _processRecord = new List<ProcessRunRecord>();
+                var checkedRunNames = new List<string>();
 
-               
                 foreach (TreeNode node in _root.Nodes)
                 {
-                    string name = node.Text;
-                    // Console.WriteLine(name);
                     if (node.Checked)
-                    {
-                        iflag = true;
-
-                        ProcessRunRecord iprocessRunRecord = new ProcessRunRecord();
-                        iprocessRunRecord = MeasurementDb.GetProcessRunByName(name);
-
-                        Demo itest = new Demo();
-
-                        if (iprocessRunRecord != null)
-                        {
-                            List<ProcessStepRecord> iProcessStepRecord = new List<ProcessStepRecord>();
-                            iProcessStepRecord = MeasurementDb.GetProcessStepsByRunId(iprocessRunRecord.RunId);
-
-
-                            MeasurementDataset iSmeasurementDataset = new MeasurementDataset();
-                            iSmeasurementDataset = MeasurementDb.GetMeasurementDatasetByRunId(iprocessRunRecord.RunId, "source", 50, iProcessStepRecord);
-
-                            MeasurementDataset iBmeasurementDataset = new MeasurementDataset();
-                            iBmeasurementDataset = MeasurementDb.GetMeasurementDatasetByRunId(iprocessRunRecord.RunId, "bias", 50, iProcessStepRecord);
-
-                            List<ImpedanceStepData> iSImpedanceStepData = new List<ImpedanceStepData>();
-                            //string iSourceStatus = "";
-                            List<ImpedanceStepData> iBImpedanceStepData = new List<ImpedanceStepData>();
-                            //string iBourceStatus = "";
-
-                            iSImpedanceStepData = MeasurementDb.GetImpedanceStepsByRunId(iprocessRunRecord.RunId, "source");
-                            iBImpedanceStepData = MeasurementDb.GetImpedanceStepsByRunId(iprocessRunRecord.RunId, "bias");
-
-                            //iSourceStatus
-                            string iSourceStatus = itest.Run(iSImpedanceStepData);
-                            string iBourceStatus = itest.Run(iBImpedanceStepData);
-
-                            _sourcePanel.OverlappedChartDisplay(0, _root, name, iSmeasurementDataset, iSourceStatus);
-                            _biasPanel.OverlappedChartDisplay(1, _root, name, iBmeasurementDataset, iBourceStatus);
-
-
-                        }
-
-                        // _sourcePanel.OverlappedChart(0, _root, name);
-                        // _biasPanel.OverlappedChart(1, _root, name);
-                    }
-                    else
-                    {
-                        _sourcePanel.RemoveAtDatasets(0, name);
-                        _biasPanel.RemoveAtDatasets(1, name);
-                    }
+                        checkedRunNames.Add(node.Text);
 
                 }
 
-                if(iflag == false)
+                if (checkedRunNames.Count == 0)
                 {
                     MessageBox.Show("선택된 항목이 없습니다.", "검색",
                     MessageBoxButtons.OK, MessageBoxIcon.Information);
 
                     _sourcePanel.RemoveAllDatasets();
                     _biasPanel.RemoveAllDatasets();
+                    return;
                 }
 
-                _processRecord = MeasurementDb.GetProcessRuns();
+                try
+                {
+                    btnSearch.Enabled = false;
+                    ShowLoading("Loading...");
 
+                    var loadedRuns = await Task.Run(() => LoadCheckedRunData(checkedRunNames));
 
-                foreach (TreeNode node in _root.Nodes) 
-                    foreach (var runName in _processRecord)
+                    _sourcePanel.RemoveAllDatasets();
+                    _biasPanel.RemoveAllDatasets();
+
+                    foreach (var run in loadedRuns)
                     {
-
-                        if (node.ToString() == runName.RunName && node.Checked == true)
-                        {
-                            ProcessRunRecord iprocessRunRecord = new ProcessRunRecord();
-                            iprocessRunRecord = runName;
-                        }
-
+                        _sourcePanel.OverlappedChartDisplay(0, _root, run.Name, run.SourceDataset, run.SourceStatus);
+                        _biasPanel.OverlappedChartDisplay(1, _root, run.Name, run.BiasDataset, run.BiasStatus);
                     }
+                }
+                catch (Exception ex)
+                {
+                    MessageBox.Show("데이터 로딩 중 오류가 발생했습니다.\n\n" + ex.Message,
+                        "Loading", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                }
+                finally
+                {
+                    HideLoading();
+                    btnSearch.Enabled = true;
+                }
 
-
-                    // TODO: 검색 로직 연결 (예: ParameterSetting의 기간으로 MeasurementDb 재조회 후 트리 리로드)
-                    //MessageBox.Show("검색 기능은 아직 구현되지 않았습니다.", "검색",
-                    //MessageBoxButtons.OK, MessageBoxIcon.Information);
             };
 
+            var btnLearning = new Button
+            {
+                Text = "LEARNING",
+                Dock = DockStyle.Fill,
+                Font = new Font("Malgun Gothic", 9.5f)
+            };
+            btnLearning.Click += async (s, e) =>
+            {
+                var goldenRunIds = new List<long>();
+                string irecipeName = "";
+
+                foreach (TreeNode node in _root.Nodes)
+                {
+                    string name = node.Text;
+                    if (node.Checked)
+                    {
+                        ProcessRunRecord iprocessRunRecord = new ProcessRunRecord();
+                        iprocessRunRecord = MeasurementDb.GetProcessRunByName(name);
+
+                        if (iprocessRunRecord != null)
+                        {
+                            goldenRunIds.Add(iprocessRunRecord.RunId);
+                            irecipeName = iprocessRunRecord.RecipeName;
+                        }
+                    }
+                }
+
+                if (goldenRunIds.Count == 0)
+                {
+                    MessageBox.Show("선택된 항목이 없습니다.", "LEARNING",
+                        MessageBoxButtons.OK, MessageBoxIcon.Information);
+                    return;
+                }
+
+                try
+                {
+                    btnSearch.Enabled = false;
+                    btnLearning.Enabled = false;
+                    ShowLoading("Learning...");
+
+                    await Task.Run(() =>
+                    {
+                        double sourceThreshold = ImpedanceAnomalyDetector.CalibrateThresholdFromGoldenRuns(
+                            goldenRunIds, channel: "source", percentile: 97.0);
+
+                        double biasThreshold = ImpedanceAnomalyDetector.CalibrateThresholdFromGoldenRuns(
+                            goldenRunIds, channel: "bias", percentile: 97.0);
+
+                        MeasurementDb.SaveCalibratedThreshold(irecipeName, "source", sourceThreshold, 97.0, goldenRunIds.Count, goldenRunIds, "UserA");
+                        MeasurementDb.SaveCalibratedThreshold(irecipeName, "bias", biasThreshold, 97.0, goldenRunIds.Count, goldenRunIds, "UserA");
+                    });
+
+                    MessageBox.Show("LEARNING이 완료 되었습니다.", "LEARNING",
+                        MessageBoxButtons.OK, MessageBoxIcon.Information);
+                }
+                catch (Exception ex)
+                {
+                    MessageBox.Show("LEARNING 중 오류가 발생했습니다.\n\n" + ex.Message,
+                        "LEARNING", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                }
+                finally
+                {
+                    HideLoading();
+                    btnSearch.Enabled = true;
+                    btnLearning.Enabled = true;
+                }
+            };
+
+            bottomButtonPanel.Controls.Add(btnSearch, 0, 0);
+            bottomButtonPanel.Controls.Add(btnLearning, 1, 0);
+
             _leftPanel.Controls.Add(_tree);
-            _leftPanel.Controls.Add(btnSearch);
+            _leftPanel.Controls.Add(bottomButtonPanel);
 
             Controls.Add(_leftPanel);   // [FIX] Dock=Left → _tabs(Fill) 다음에 추가해야
                                         // 탭 영역이 이 폭만큼 정상적으로 밀려남
         }
+
+        /// <summary>
+        /// MainShell의 메뉴/버튼 등에서 호출하는 진입점 예시.
+        /// 실제로는 run_id 목록을 DB 조회(예: 최근 N개월 중 알람 없이 종료된 run)로 채우거나,
+        /// 엔지니어가 UI에서 체크박스로 선택한 run들을 넘겨받는 형태가 됩니다.
+        /// </summary>
+        public static void RunCalibrationDemo()
+        {
+            // 1) 골든 런 run_id 목록 (예시 — 실제로는 DB에서 조회하거나 UI에서 선택)
+            var goldenRunIds = new List<long> { 101, 102, 103, 104, 105 };
+
+            // 2) 채널별로 각각 캘리브레이션 (Source/Bias는 특성이 다르므로 분리)
+            double sourceThreshold = ImpedanceAnomalyDetector.CalibrateThresholdFromGoldenRuns(
+                goldenRunIds, channel: "source", percentile: 97.0);
+
+            double biasThreshold = ImpedanceAnomalyDetector.CalibrateThresholdFromGoldenRuns(
+                goldenRunIds, channel: "bias", percentile: 97.0);
+
+            Console.WriteLine($"Source 채널 캘리브레이션 threshold (97th pct): {sourceThreshold:F4}");
+            Console.WriteLine($"Bias   채널 캘리브레이션 threshold (97th pct): {biasThreshold:F4}");
+
+            // 3) 캘리브레이션된 threshold를 신규(라이브) 런 판정에 적용
+            long liveRunId = 201; // 예: 방금 종료된 신규 run
+            var liveSteps = MeasurementDb.GetImpedanceStepsByRunId(liveRunId, "bias");
+
+            if (liveSteps.Count < 2)
+            {
+                Console.WriteLine("스텝 데이터가 부족하여 판정을 건너뜁니다.");
+                return;
+            }
+
+            var results = ImpedanceAnomalyDetector.DetectAnomalies(liveSteps, threshold: biasThreshold);
+
+            Console.WriteLine($"\n[Run {liveRunId} / Bias] 판정 결과");
+            Console.WriteLine($"{"Step",5} {"AnomalyScore",13} {"Label",10}");
+            foreach (var r in results)
+                Console.WriteLine($"{r.Step,5} {r.AnomalyScore,13:F4} {r.Label,10}");
+
+            // 4) threshold 저장 (예: appsettings.json, DB 설정 테이블 등에 영구 저장)
+            //    여기서는 저장 로직 자리만 표시 — 실제 구현 시 레시피명/장비ID 기준으로 키를 나눠 저장 권장
+            // SaveThresholdToConfig(recipeName: "RecipeA", channel: "bias", threshold: biasThreshold);
+        }
+
 
         /// <summary>
         ///  check가 된 Data만이 스미스차트를 그리고, data를 화면에 표시한다.
@@ -397,15 +602,29 @@ namespace Iruza
         /// <param name="e"></param>
         private void tree_AfterCheck(object sender, TreeViewEventArgs e)
         {
-            List<string> checkedNodes = new List<string>();
+            if (_isCheckPropagating) return;
 
-            GetCheckedNodes(_tree.Nodes, checkedNodes);
-
-            //_sourcePanel.OverlappedChart(0, _root);
-
-            foreach (string nodeText in checkedNodes)
+            _isCheckPropagating = true;
+            try
             {
-                Console.WriteLine(nodeText);
+                // Root 노드를 체크/해제했을 때만 하위 노드 전체에 전파
+                if (e.Node == _root)
+                {
+                    SetChildrenChecked(e.Node, e.Node.Checked);
+                }
+            }
+            finally
+            {
+                _isCheckPropagating = false;
+            }
+        }
+
+        void SetChildrenChecked(TreeNode node, bool isChecked)
+        {
+            foreach (TreeNode child in node.Nodes)
+            {
+                child.Checked = isChecked;
+                SetChildrenChecked(child, isChecked); // 손자 노드가 있는 구조라면 재귀로 계속 전파
             }
         }
 

@@ -94,6 +94,92 @@ namespace Iruza
             return new NpgsqlConnection(connectionString);
         }
 
+        public static double? GetActiveThreshold(string recipeName, string channel)
+        {
+            const string sql = @"
+SELECT threshold FROM anomaly_threshold_config
+WHERE recipe_name = @recipe_name AND channel::text = @channel;";
+
+            using (var conn = CreateConnection())
+            using (var cmd = new NpgsqlCommand(sql, conn))
+            {
+                cmd.Parameters.AddWithValue("recipe_name", recipeName);
+                cmd.Parameters.AddWithValue("channel", channel);
+                conn.Open();
+                var result = cmd.ExecuteScalar();
+                return result == null || result == DBNull.Value ? (double?)null : Convert.ToDouble(result);
+            }
+        }
+
+        public static void SaveCalibratedThreshold(
+            string recipeName, string channel, double threshold,
+            double percentile, int sampleRunCount, List<long> goldenRunIds, string calibratedBy = null)
+        {
+            using (var conn = CreateConnection())
+            {
+                conn.Open();
+                using (var tx = conn.BeginTransaction())
+                {
+                    // 1) 현재 threshold upsert
+                    const string upsertSql = @"
+INSERT INTO anomaly_threshold_config
+    (recipe_name, channel, threshold, percentile, sample_run_count, calibrated_at, updated_at)
+VALUES
+    (@recipe_name, @channel::rf_channel, @threshold, @percentile, @sample_run_count, now(), now())
+ON CONFLICT (recipe_name, channel)
+DO UPDATE SET threshold = EXCLUDED.threshold, percentile = EXCLUDED.percentile,
+              sample_run_count = EXCLUDED.sample_run_count, updated_at = now();";
+
+                    using (var cmd = new NpgsqlCommand(upsertSql, conn, tx))
+                    {
+                        cmd.Parameters.AddWithValue("recipe_name", recipeName);
+                        cmd.Parameters.AddWithValue("channel", channel);
+                        cmd.Parameters.AddWithValue("threshold", threshold);
+                        cmd.Parameters.AddWithValue("percentile", percentile);
+                        cmd.Parameters.AddWithValue("sample_run_count", sampleRunCount);
+                        cmd.ExecuteNonQuery();
+                    }
+
+                    // 2) 이력 기록 + calibration_id 획득
+                    const string logSql = @"
+INSERT INTO anomaly_threshold_calibration_log
+    (recipe_name, channel, threshold, percentile, sample_run_count, calibrated_by)
+VALUES
+    (@recipe_name, @channel::rf_channel, @threshold, @percentile, @sample_run_count, @calibrated_by)
+RETURNING calibration_id;";
+
+                    long calibrationId;
+                    using (var cmd = new NpgsqlCommand(logSql, conn, tx))
+                    {
+                        cmd.Parameters.AddWithValue("recipe_name", recipeName);
+                        cmd.Parameters.AddWithValue("channel", channel);
+                        cmd.Parameters.AddWithValue("threshold", threshold);
+                        cmd.Parameters.AddWithValue("percentile", percentile);
+                        cmd.Parameters.AddWithValue("sample_run_count", sampleRunCount);
+                        cmd.Parameters.AddWithValue("calibrated_by", (object)calibratedBy ?? DBNull.Value);
+                        calibrationId = (long)cmd.ExecuteScalar();
+                    }
+
+                    // 3) 사용된 골든 런들 매핑
+                    const string mapSql = @"
+INSERT INTO anomaly_threshold_calibration_run (calibration_id, run_id)
+VALUES (@calibration_id, @run_id);";
+
+                    foreach (var runId in goldenRunIds)
+                    {
+                        using (var cmd = new NpgsqlCommand(mapSql, conn, tx))
+                        {
+                            cmd.Parameters.AddWithValue("calibration_id", calibrationId);
+                            cmd.Parameters.AddWithValue("run_id", runId);
+                            cmd.ExecuteNonQuery();
+                        }
+                    }
+
+                    tx.Commit();
+                }
+            }
+        }
+
         /// <summary>
         /// 특정 run_id, channel(Source/Bias)에 대한 스미스 차트 포인트를 조회하여
         /// ImpedanceAnomalyDetector에서 바로 사용할 수 있는 ImpedanceStepData 리스트로 반환합니다.

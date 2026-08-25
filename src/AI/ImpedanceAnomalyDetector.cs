@@ -150,6 +150,95 @@ namespace Iruza
         }
 
         /// <summary>
+        /// Method A + Method D를 가중 평균하여 최종 이상 스코어와 라벨을 산출합니다.
+        /// 데이터가 더 쌓이면 여기에 Method B(Mahalanobis), C(Isolation Forest) 점수를
+        /// 추가로 곱-가중하면 됩니다 (Python 프로토타입 참고).
+        /// </summary>
+        public static List<AnomalyResult> DetectAnomaliesAI(
+            IReadOnlyList<ImpedanceStepData> steps,
+            double weightDelta = 0.55,
+            double weightCusum = 0.45,
+            double threshold = 0.5,
+            Func<ImpedanceStepData, double> cusumField = null)
+        {
+            if (steps == null || steps.Count == 0)
+                return new List<AnomalyResult>();
+
+            cusumField ??= s => s.VSWR;
+
+            double wSum = weightDelta + weightCusum;
+            double wA = weightDelta / wSum;
+            double wD = weightCusum / wSum;
+
+            var scoreA = ComputeStepDeltaZScore(steps);
+            var scoreD = ComputeCusum(steps, cusumField);
+
+            var results = new List<AnomalyResult>(steps.Count);
+            for (int i = 0; i < steps.Count; i++)
+            {
+                double final = wA * scoreA[i] + wD * scoreD[i];
+                results.Add(new AnomalyResult
+                {
+                    Step = steps[i].Step,
+                    ScoreDelta = scoreA[i],
+                    ScoreCusum = scoreD[i],
+                    AnomalyScore = final,
+                    IsAbnormal = final >= threshold
+                });
+            }
+            return results;
+        }
+
+        /// <summary>
+        /// 골든 런(정상 확인된) run_id 목록을 받아 threshold를 캘리브레이션합니다.
+        /// DB 조회는 MeasurementDb.GetImpedanceStepsByRunId()를 사용합니다.
+        /// </summary>
+        public static double CalibrateThresholdFromGoldenRuns(
+            IEnumerable<long> goldenRunIds,
+            string channel,
+            double percentile = 97.0)
+        {
+            var allScores = new List<double>();
+
+            foreach (var runId in goldenRunIds)
+            {
+                var steps = MeasurementDb.GetImpedanceStepsByRunId(runId, channel);
+                if (steps.Count < 2) continue; // Method A/D는 스텝 델타 계산이라 최소 2개 필요
+
+                // threshold를 극단값(999)으로 줘서 라벨링은 의미 없게 만들고 점수만 취함
+                var results = DetectAnomaliesAI(steps, threshold: 999);
+
+                // 첫 스텝은 delta=0으로 인위적으로 낮게 잡히므로(비교 대상 없음) 캘리브레이션에서 제외 권장
+                allScores.AddRange(results.Skip(1).Select(r => r.AnomalyScore));
+            }
+
+            return CalculatePercentile(allScores, percentile);
+        }
+
+        // ----------------------------------------------------------------
+        // Threshold 캘리브레이션 (골든 런 데이터 기반 percentile 계산)
+        // ----------------------------------------------------------------
+
+        /// <summary>
+        /// 점수 리스트에서 지정한 percentile 값을 선형보간(linear interpolation) 방식으로 계산.
+        /// (numpy.percentile 기본 방식과 동일한 계산법)
+        /// </summary>
+        public static double CalculatePercentile(IEnumerable<double> scores, double percentile)
+        {
+            var sorted = scores.OrderBy(v => v).ToList();
+            if (sorted.Count == 0) return 0.5; // 데이터 없으면 기본값
+            if (sorted.Count == 1) return sorted[0];
+
+            double rank = (percentile / 100.0) * (sorted.Count - 1);
+            int lo = (int)Math.Floor(rank);
+            int hi = (int)Math.Ceiling(rank);
+            if (lo == hi) return sorted[lo];
+
+            double frac = rank - lo;
+            return sorted[lo] + frac * (sorted[hi] - sorted[lo]);
+        }
+
+        /// <summary>
         /// (선택) Z = R + jX 를 표준 Z0 기준 반사계수 Γ = (Z-Z0)/(Z+Z0) 로 정규화.
         /// 스미스 차트 좌표와 정확히 일치시키려면 ComputeStepDeltaZScore 호출 전에
         /// R, X 대신 이 값의 Real/Imaginary를 넣어 사용하는 것을 권장합니다.
@@ -169,6 +258,8 @@ namespace Iruza
 
         private static double Clamp(double v, double min, double max) =>
             v < min ? min : (v > max ? max : v);
+
+
     }
 
     // ==========================================================================
@@ -178,27 +269,10 @@ namespace Iruza
     // ==========================================================================
     public class Demo
     {
-        public string  Run(List<ImpedanceStepData> pImpedanceStepData)
+        public string  Run(List<ImpedanceStepData> pImpedanceStepData, double pweightDelta,double pweightCusum,double pthreshold)
         {
             // Python 샘플 데이터(Bias 궤적)와 동일한 값 - Step 7이 이상치여야 함
-            /*            var steps = new List<ImpedanceStepData>
-                        {
-
-                            new ImpedanceStepData { Step = 1, R = 20.7, X =  0.39, Vout =  5.39, Iout = 0.26, VSWR = 2.412 },
-                            new ImpedanceStepData { Step = 2, R = 22.9, X = -0.48, Vout = 25.24, Iout = 1.10, VSWR = 2.180 },
-                            new ImpedanceStepData { Step = 3, R = 22.6, X =  0.78, Vout = 23.01, Iout = 1.02, VSWR = 2.218 },
-                            new ImpedanceStepData { Step = 4, R = 24.9, X =  0.35, Vout = 26.63, Iout = 1.07, VSWR = 2.009 },
-                            new ImpedanceStepData { Step = 5, R = 26.5, X =  0.86, Vout = 26.40, Iout = 0.99, VSWR = 1.888 },
-                            new ImpedanceStepData { Step = 6, R = 26.1, X = -1.72, Vout = 25.66, Iout = 0.98, VSWR = 1.917 },
-                            new ImpedanceStepData { Step = 7, R = 12.8, X =  0.11, Vout =  0.51, Iout = 0.04, VSWR = 3.922 }, // 이상치
-                            new ImpedanceStepData { Step = 8, R = 27.4, X =  0.29, Vout =  4.39, Iout = 0.16, VSWR = 1.823 },
-                            new ImpedanceStepData { Step = 9, R = 18.2, X =  0.21, Vout =  4.55, Iout = 0.25, VSWR = 2.747 },
-
-                        };
-
-                        var results = ImpedanceAnomalyDetector.DetectAnomalies(steps);*/
-
-            var results = ImpedanceAnomalyDetector.DetectAnomalies(pImpedanceStepData);
+            var results = ImpedanceAnomalyDetector.DetectAnomalies(pImpedanceStepData, pweightDelta, pweightCusum, pthreshold);
 
             Console.WriteLine($"{"Step",5} {"ScoreDelta",12} {"ScoreCusum",12} {"AnomalyScore",13} {"Label",10}");
             foreach (var r in results)
@@ -212,6 +286,31 @@ namespace Iruza
                 }
             }
             return "NORMAL";
+        }
+        public void Learning(List<ImpedanceStepData> pImpedanceStepData)
+        {
+            // Python 샘플 데이터(Bias 궤적)와 동일한 값 - Step 7이 이상치여야 함
+            var steps = new List<ImpedanceStepData>
+            {
+                new ImpedanceStepData { Step = 1, R = 20.7, X =  0.39, Vout =  5.39, Iout = 0.26, VSWR = 2.412 },
+                new ImpedanceStepData { Step = 2, R = 22.9, X = -0.48, Vout = 25.24, Iout = 1.10, VSWR = 2.180 },
+                new ImpedanceStepData { Step = 3, R = 22.6, X =  0.78, Vout = 23.01, Iout = 1.02, VSWR = 2.218 },
+                new ImpedanceStepData { Step = 4, R = 24.9, X =  0.35, Vout = 26.63, Iout = 1.07, VSWR = 2.009 },
+                new ImpedanceStepData { Step = 5, R = 26.5, X =  0.86, Vout = 26.40, Iout = 0.99, VSWR = 1.888 },
+                new ImpedanceStepData { Step = 6, R = 26.1, X = -1.72, Vout = 25.66, Iout = 0.98, VSWR = 1.917 },
+                new ImpedanceStepData { Step = 7, R = 12.8, X =  0.11, Vout =  0.51, Iout = 0.04, VSWR = 3.922 }, // 이상치
+                new ImpedanceStepData { Step = 8, R = 27.4, X =  0.29, Vout =  4.39, Iout = 0.16, VSWR = 1.823 },
+                new ImpedanceStepData { Step = 9, R = 18.2, X =  0.21, Vout =  4.55, Iout = 0.25, VSWR = 2.747 },
+            };
+
+            var results = ImpedanceAnomalyDetector.DetectAnomaliesAI(pImpedanceStepData);
+
+            Console.WriteLine($"{"Step",5} {"ScoreDelta",12} {"ScoreCusum",12} {"AnomalyScore",13} {"Label",10}");
+            foreach (var r in results)
+            {
+                Console.WriteLine(
+                    $"{r.Step,5} {r.ScoreDelta,12:F4} {r.ScoreCusum,12:F4} {r.AnomalyScore,13:F4} {r.Label,10}");
+            }
         }
 
         //public static void Main() => Run();
