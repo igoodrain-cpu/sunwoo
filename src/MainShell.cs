@@ -15,6 +15,8 @@ using System.Windows.Forms;
 using System.Xml.Linq;
 //using Iruza.Anomaly;
 using Iruza.src.Parameter;
+using System.Runtime.InteropServices;
+using CheckBoxState = System.Windows.Forms.VisualStyles.CheckBoxState;
 
 namespace Iruza
 {
@@ -35,6 +37,13 @@ namespace Iruza
         ParameterForm _ParaDlg;
 
         //List<ProcessRunRecord> _processRecord;
+
+        // 클래스 상단에 추가
+        [DllImport("user32.dll", CharSet = CharSet.Auto)]
+        private static extern IntPtr SendMessage(IntPtr hWnd, int msg, IntPtr wParam, IntPtr lParam);
+
+        private const int TVM_SETEXTENDEDSTYLE = 0x1100 + 44;
+        private const int TVS_EX_DOUBLEBUFFER = 0x0004;
 
         private sealed class LoadedRunData
         {
@@ -87,7 +96,7 @@ namespace Iruza
                     this.Icon = new Icon(stream);
             }
 
-            _tree = new TreeView
+          /*  _tree = new TreeView
             {
                 Dock = DockStyle.Fill,
                 Font = new Font("Malgun Gothic", 9.5f),
@@ -97,15 +106,108 @@ namespace Iruza
                 ShowLines = true,
                 CheckBoxes = true,
                 ItemHeight = 26
-            };      
+            };*/
+
+            _tree = new TreeView
+            {
+                Dock = DockStyle.Fill,
+                Font = new Font("Malgun Gothic", 9.5f),
+                BorderStyle = BorderStyle.None,
+                HideSelection = false,
+                FullRowSelect = true,
+                ShowLines = true,
+                //CheckBoxes = true,
+                CheckBoxes = false,
+                ItemHeight = 26,
+                DrawMode = TreeViewDrawMode.OwnerDrawAll   // ← 추가
+            };
+
+            _tree.HandleCreated += (s, e) => EnableTreeViewDoubleBuffer(_tree);
+            _tree.DrawNode += Tree_DrawNode;
+            _tree.MouseDown += Tree_MouseDown;   // ← NodeMouseClick 대신 MouseDown
 
             BuildMenu();
             BuildTabs();   // Dock=Fill → 반드시 먼저 Controls.Add
             BuildTree();   // Dock=Left → 그 다음에 Controls.Add
             BuildLoadingOverlay();
 
-            _tree.AfterCheck += tree_AfterCheck;
+            //_tree.AfterCheck += tree_AfterCheck;
 
+        }
+
+        private void Tree_MouseDown(object sender, MouseEventArgs e)
+        {
+            TreeNode node = _tree.GetNodeAt(e.Location);
+            if (node == null) return;
+
+            var checkBoxState = node.Checked ? CheckBoxState.CheckedNormal : CheckBoxState.UncheckedNormal;
+            using (var g = _tree.CreateGraphics())
+            {
+                Size checkSize = CheckBoxRenderer.GetGlyphSize(g, checkBoxState);
+
+                int checkBoxX = node.Bounds.Left - checkSize.Width - 3;
+                var checkArea = new Rectangle(checkBoxX, node.Bounds.Top, checkSize.Width, node.Bounds.Height);
+
+                if (checkArea.Contains(e.Location))
+                {
+                    node.Checked = !node.Checked;
+
+                    // root 노드를 체크/해제하면 모든 하위 노드에 동일하게 전파
+                    if (node == _root)
+                    {
+                        SetChildrenChecked(node, node.Checked);
+                    }
+
+                    // 전체 트리를 다시 그려서 하위 노드들 체크박스까지 화면에 반영
+                    _tree.Invalidate();
+                }
+            }
+        }
+
+        private void Tree_DrawNode(object sender, DrawTreeNodeEventArgs e)
+        {
+            var tree = e.Node.TreeView;
+            bool isSelected = (e.State & TreeNodeStates.Selected) != 0;
+
+            var labelBounds = e.Node.Bounds;   // ← 항상 안정적인 라벨 영역 (DrawMode 무관)
+
+            // 1. 배경 채우기 (행 전체 폭)
+            Color backColor = isSelected ? Color.FromArgb(255, 224, 130) : tree.BackColor;
+            using (var backBrush = new SolidBrush(backColor))
+            {
+                e.Graphics.FillRectangle(backBrush,
+                    new Rectangle(0, labelBounds.Top, tree.ClientSize.Width, labelBounds.Height));
+            }
+
+            // 2. 체크박스: 라벨 왼쪽에 배치
+            var checkBoxState = e.Node.Checked
+                ? CheckBoxState.CheckedNormal
+                : CheckBoxState.UncheckedNormal;
+
+            Size checkSize = CheckBoxRenderer.GetGlyphSize(e.Graphics, checkBoxState);
+            int checkBoxX = labelBounds.Left - checkSize.Width - 3;
+            int checkBoxY = labelBounds.Top + (labelBounds.Height - checkSize.Height) / 2;
+
+            CheckBoxRenderer.DrawCheckBox(e.Graphics, new Point(checkBoxX, checkBoxY), checkBoxState);
+
+            // 3. 텍스트
+            Color textColor = isSelected ? Color.Black : (e.Node.ForeColor == Color.Empty ? Color.Black : e.Node.ForeColor);
+
+            TextRenderer.DrawText(
+                e.Graphics,
+                e.Node.Text,
+                e.Node.NodeFont ?? tree.Font,
+                labelBounds,
+                textColor,
+                TextFormatFlags.VerticalCenter);
+
+            e.DrawDefault = false;
+        }
+
+        private void EnableTreeViewDoubleBuffer(TreeView tree)
+        {
+            if (tree.IsHandleCreated)
+                SendMessage(tree.Handle, TVM_SETEXTENDEDSTYLE, (IntPtr)TVS_EX_DOUBLEBUFFER, (IntPtr)TVS_EX_DOUBLEBUFFER);
         }
 
         void BuildLoadingOverlay()
