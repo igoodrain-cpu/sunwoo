@@ -398,7 +398,7 @@ namespace Iruza
             var mHelp = new ToolStripMenuItem("도움말(&H)");
             mHelp.DropDownItems.Add("버전 정보", null, (s, e) =>
                 MessageBox.Show(
-                    "Iruza RF Smith Chart Analyzer  v1.0\n\nH&iruja Inc.\nRF 임피던스 매칭 / Plasma Fingerprint 분석 솔루션",
+                    "RF Impedance Analyzer v1.0",
                     "버전 정보", MessageBoxButtons.OK, MessageBoxIcon.Information));
 
             menu.Items.Add(mFile);
