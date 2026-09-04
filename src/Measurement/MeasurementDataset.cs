@@ -105,13 +105,13 @@ namespace Iruza
         public void ToCsv(string path)
         {
             var sb = new StringBuilder();
-            sb.AppendLine("Step,Vout (Vrms),Iout (Arms),Phase θ (deg),R (Ω),X (Ω)," +
+            sb.AppendLine("Step,Step Name,Vout (Vrms),Iout (Arms),Phase θ (deg),R (Ω),X (Ω)," +
                           "Γ real,Γ imag,|Γ|,VSWR,Z text,z normalized," +
-                          "Forward P (W),Reflected P (W),Delivered P (W)");
+                          "Forward P (W),Reflected P (W),Delivered P (W),Ar Flow (sccm),O2 Flow (sccm),APC Pressure (Torr),APC Position (%),VVC1 (pF),VVC2 (pF),VVC3 (pF),Proc Status");
             var ci = CultureInfo.InvariantCulture;
             foreach (var s in Steps)
                 sb.AppendLine(string.Join(",",
-                    s.Step,
+                    s.Step, $"\"{s.Step_Name}\"",
                     s.Vout_Vrms.ToString("F4",ci), s.Iout_Arms.ToString("F4",ci),
                     s.Phase_deg.ToString("F2",ci),
                     s.R.ToString("F4",ci), s.X.ToString("F4",ci),
@@ -119,7 +119,9 @@ namespace Iruza
                     s.GammaMag.ToString("F6",ci), s.VSWR.ToString("F4",ci),
                     $"\"{s.Z_Text}\"", $"\"{s.Z_Normalized}\"",
                     s.ForwardP_W.ToString("F4",ci), s.ReflectedP_W.ToString("F4",ci),
-                    s.DeliveredP_W.ToString("F4",ci)));
+                    s.DeliveredP_W.ToString("F4",ci), s.Ar_Flow.ToString("F1"), s.O2_Flow.ToString("F1"),
+                    s.APC_Pressure.ToString("F2"), s.APC_Position.ToString("F2"), s.VVC1.ToString("F2"),
+                    s.VVC2.ToString("F2"), s.VVC3.ToString("F2"), s.Proc_Status));
             File.WriteAllText(path, sb.ToString(), Encoding.UTF8);
         }
 

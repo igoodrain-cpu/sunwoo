@@ -510,8 +510,8 @@ namespace Iruza
                 tb.Items.Add(b);
             }
 
-            Btn("CSV 가져오기", ImportCsv);
-            tb.Items.Add(new ToolStripSeparator());
+           // Btn("CSV 가져오기", ImportCsv);
+           // tb.Items.Add(new ToolStripSeparator());
             Btn("CSV 내보내기", ExportCsv);
             //Btn("스텝 추가", AddManual);
             //Btn("선택 삭제", DeleteSelected);
@@ -549,7 +549,7 @@ namespace Iruza
             };
 
             var cols = new[]{
-                ("Step","#",true),("Vout_Vrms","Vout\nVrms",true),
+                ("Step","#",true),("Step_Name","Step Name",true),("Vout_Vrms","Vout\nVrms",true),
                 ("Iout_Arms","Iout\nArms",true),("Phase_deg","θ\ndeg",true),
                 ("R","R Ω",true),("X","X Ω",true),
                 ("Gamma_Real","Γ real",true),("Gamma_Imag","Γ imag",true),
@@ -589,7 +589,7 @@ namespace Iruza
             foreach (var s in _ds.Steps)
             {
                 _grid.Rows.Add(
-                    s.Step, s.Vout_Vrms.ToString("F4"), s.Iout_Arms.ToString("F4"),
+                    s.Step, s.Step_Name, s.Vout_Vrms.ToString("F4"), s.Iout_Arms.ToString("F4"),
                     s.Phase_deg.ToString("F2"), s.R.ToString("F4"), s.X.ToString("F4"),
                     s.Gamma_Real.ToString("F6"), s.Gamma_Imag.ToString("F6"),
                     s.GammaMag.ToString("F6"), s.VSWR.ToString("F3"),
@@ -600,11 +600,11 @@ namespace Iruza
                     s.APC_Pressure.ToString("F2"), s.APC_Position.ToString("F2"), s.VVC1.ToString("F2"), s.VVC2.ToString("F2"), s.VVC3.ToString("F2"),s.Proc_Status
                 );
                 var row = _grid.Rows[_grid.Rows.Count - 1];
-                Color vc = s.VSWR < 1.5
+             /*   Color vc = s.VSWR < 1.5
                     ? Color.FromArgb(20, 0, 180, 0)
                     : s.VSWR < 2.5 ? Color.FromArgb(20, 220, 180, 0)
                     : Color.FromArgb(20, 220, 0, 0);
-                row.Cells[9].Style.BackColor = vc;
+                row.Cells[9].Style.BackColor = vc;*/
             }
         }
 
@@ -703,6 +703,12 @@ namespace Iruza
             Color.FromArgb(180, 90, 180),  // 보라
             Color.FromArgb(210, 160, 40),  // 금색
             Color.FromArgb(40, 175, 175),  // 청록
+            Color.FromArgb(175, 40, 175),  // 자주
+            Color.FromArgb(200, 100, 50),  // 주황
+            Color.FromArgb(40, 175, 175),  // 청록
+            Color.FromArgb(175, 40, 175),  // 자주
+            Color.FromArgb(58, 6, 3),  // 진한빨강
+            Color.FromArgb(23, 54, 118),  // 청록
         };
 
         private class Overlay
@@ -925,6 +931,7 @@ namespace Iruza
             {
                 $"[{ov.Name}]",
                 $"Step {s.Step}",
+                $"Step Name = {s.Step_Name}",
                 $"Z = {s.Z_Text}",
                 $"|Γ| = {s.GammaMag:F4}",
                 $"VSWR = {s.VSWR:F3}",
@@ -1091,6 +1098,7 @@ namespace Iruza
             Result = new MeasurementStep
             {
                 Step = (int)_nStep.Value,
+                Step_Name = _nStep.Name,
                 Vout_Vrms = (double)_nVout.Value,
                 Iout_Arms = (double)_nIout.Value,
                 Phase_deg = (double)_nPhase.Value,

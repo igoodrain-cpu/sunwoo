@@ -45,6 +45,14 @@ namespace Iruza
         private const int TVM_SETEXTENDEDSTYLE = 0x1100 + 44;
         private const int TVS_EX_DOUBLEBUFFER = 0x0004;
 
+        short _stepNum = 0;
+
+        double _minPower = 0;
+
+        double _maxPower = 0;
+
+        string _recipeName = "";
+
         private sealed class LoadedRunData
         {
             public string Name { get; set; }
@@ -271,7 +279,7 @@ namespace Iruza
                 _loadingOverlay.Visible = false;
         }
 
-        List<LoadedRunData> LoadCheckedRunData(List<string> checkedRunNames)
+       /* List<LoadedRunData> LoadCheckedRunData(List<string> checkedRunNames)
         {
             var result = new List<LoadedRunData>();
             var detector = new Demo();
@@ -315,6 +323,51 @@ namespace Iruza
             }
 
             return result;
+        }*/
+
+        List<LoadedRunData> LoadCheckedRunData(List<string> checkedRunNames)
+        {
+            var result = new List<LoadedRunData>();
+            //var detector = new Demo();
+
+            foreach (var name in checkedRunNames)
+            {
+                var processRun = MeasurementDb.GetProcessRunByName(name);
+                if (processRun == null)
+                    continue;
+
+
+                if (_ParaDlg != null)
+                {
+                    var processSteps = MeasurementDb.GetProcessStepsByRunId(processRun.RunId, _ParaDlg.getStepNum());
+                    var sourceDataset = MeasurementDb.GetMeasurementDatasetByRunId(processRun.RunId, "source", _ParaDlg.getStepNum(), _ParaDlg.getPowerMin(), _ParaDlg.getPowerMax(), 50);
+                    var biasDataset = MeasurementDb.GetMeasurementDatasetByRunId(processRun.RunId, "bias", _ParaDlg.getStepNum(), _ParaDlg.getPowerMin(), _ParaDlg.getPowerMax(), 50);
+
+                    result.Add(new LoadedRunData
+                    {
+                        Name = name,
+                        SourceDataset = sourceDataset,
+                        BiasDataset = biasDataset,
+                    });
+                }
+                else
+                {
+
+                    var processSteps = MeasurementDb.GetProcessStepsByRunId(processRun.RunId, _stepNum);
+                    var sourceDataset = MeasurementDb.GetMeasurementDatasetByRunId(processRun.RunId, "source", _stepNum, _minPower, _maxPower, 50);
+                    var biasDataset = MeasurementDb.GetMeasurementDatasetByRunId(processRun.RunId, "bias", _stepNum, _minPower, _maxPower, 50);
+
+                    result.Add(new LoadedRunData
+                    {
+                        Name = name,
+                        SourceDataset = sourceDataset,
+                        BiasDataset = biasDataset,
+                    });
+                }
+
+            }
+
+            return result;
         }
 
         // ── 메뉴바 ──
@@ -331,6 +384,8 @@ namespace Iruza
             mFile.DropDownItems.Add("파라미터 설정", null, (s, e) =>
             {
                 GetDataViewer()?.SaveChartPng();
+
+                //_ParaDlg = new ParameterForm(_root);
 
                 _ParaDlg = new ParameterForm(_root);
                 _ParaDlg.ShowDialog();
@@ -460,12 +515,30 @@ namespace Iruza
             try
             {
                 var parameterPath = Path.Combine(Application.StartupPath, "Parameter", "ParameterSetting.json");
-                var parameterSetting = ParameterSetting.Load(parameterPath);
+                //var parameterSetting = ParameterSetting.Load(parameterPath);
+                var parameterSetting = ParameterSetting.LoadPara(parameterPath);
 
                 var startTime = parameterSetting.StartTime;
                 var endTime = parameterSetting.EndTime;
 
-                foreach (var runName in MeasurementDb.GetProcessRunNames(startTime, endTime))
+                if (parameterSetting.StepNum == null || parameterSetting.MinPower == null || parameterSetting.MaxPower == null || parameterSetting.RecipeName == null)
+                {
+                    _recipeName = "";
+                    _stepNum = 0;
+                    _minPower = 0;
+                    _maxPower = 0;
+
+                }
+                else
+                {
+                    _stepNum = (short)parameterSetting.StepNum;
+                    _minPower = (double)parameterSetting.MinPower;
+                    _maxPower = (double)parameterSetting.MaxPower;
+                    _recipeName = parameterSetting.RecipeName;
+                }
+
+                //foreach (var runName in MeasurementDb.GetProcessRunNames(startTime, endTime))
+                foreach (var runName in MeasurementDb.SearchProcessRunNames(_recipeName, _stepNum, (Decimal)_minPower, (Decimal)_maxPower, startTime, endTime))
                     _root.Nodes.Add(new TreeNode(runName));
             }
             catch (Exception ex)

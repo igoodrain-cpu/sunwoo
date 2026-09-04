@@ -13,6 +13,9 @@ namespace Iruza
     {
         // ── 원시 측정값 ──
         public int    Step         { get; set; }
+
+        public string Step_Name { get; set; } = "";
+
         public double Vout_Vrms    { get; set; }
         public double Iout_Arms    { get; set; }
         public double Phase_deg    { get; set; }

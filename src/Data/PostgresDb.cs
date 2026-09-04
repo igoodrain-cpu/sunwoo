@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Configuration;
 using System.Globalization;
 using Npgsql;
+using NpgsqlTypes;
 
 namespace Iruza
 {
@@ -92,6 +93,161 @@ namespace Iruza
                 throw new InvalidOperationException("App.config의 MeasurementDb 연결 문자열이 비어 있습니다.");
 
             return new NpgsqlConnection(connectionString);
+        }
+
+        public static MeasurementDataset GetMeasurementDatasetByRunId(
+long runId, string channel, int? stepNum = null,
+double? minDeliveredP = null, double? maxDeliveredP = null,
+double z0 = 50.0)
+        {
+            string sql = @"
+SELECT r.run_name,
+       s.step_num,s.step_name,
+       p.vout_vrms, p.iout_arms, p.phase_deg,
+       p.r_ohm, p.x_ohm,
+       p.gamma_real, p.gamma_imag, p.gamma_mag, p.vswr,
+       p.z_text, p.z_normalized,
+       p.forward_p_w, p.reflected_p_w, p.delivered_p_w,
+       s.ar_flow, s.o2_flow, s.apc_pressure, s.apc_position,
+       s.vvc1, s.vvc2, s.vvc3, s.proc_status
+FROM process_run r
+INNER JOIN process_step s ON s.run_id = r.run_id
+INNER JOIN smith_chart_point p ON p.step_id = s.step_id
+WHERE r.run_id = @run_id
+  AND p.channel = @channel::rf_channel";
+
+            if (stepNum.HasValue && stepNum.Value != 0)
+                sql += " AND s.step_num = @step_num";
+
+            if (minDeliveredP.HasValue)
+                sql += " AND p.delivered_p_w >= @min_delivered_p";
+
+            if (maxDeliveredP.HasValue)
+                sql += " AND p.delivered_p_w <= @max_delivered_p";
+
+            sql += " ORDER BY s.step_num ASC;";
+
+            MeasurementDataset ds = null;
+
+            using (var conn = CreateConnection())
+            using (var cmd = new NpgsqlCommand(sql, conn))
+            {
+                cmd.Parameters.AddWithValue("run_id", runId);
+                cmd.Parameters.Add(new NpgsqlParameter("channel", NpgsqlDbType.Unknown) { Value = channel ?? string.Empty });
+
+                if (stepNum.HasValue && stepNum.Value != 0)
+                    cmd.Parameters.AddWithValue("step_num", stepNum.Value);
+
+                if (minDeliveredP.HasValue)
+                    cmd.Parameters.AddWithValue("min_delivered_p", minDeliveredP.Value);
+
+                if (maxDeliveredP.HasValue)
+                    cmd.Parameters.AddWithValue("max_delivered_p", maxDeliveredP.Value);
+
+                conn.Open();
+
+                using (var reader = cmd.ExecuteReader())
+                {
+                    while (reader.Read())
+                    {
+                        if (ds == null)
+                        {
+                            ds = new MeasurementDataset
+                            {
+                                Name = GetString(reader, "run_name") + "_" + channel,
+                                Z0 = z0
+                            };
+                        }
+
+                        ds.Steps.Add(new MeasurementStep
+                        {
+                            Step = Convert.ToInt32(GetValue<short>(reader, "step_num")),
+                            Step_Name = GetString(reader, "step_name"),
+                            Vout_Vrms = ToDouble(GetValue<decimal?>(reader, "vout_vrms")),
+                            Iout_Arms = ToDouble(GetValue<decimal?>(reader, "iout_arms")),
+                            Phase_deg = ToDouble(GetValue<decimal?>(reader, "phase_deg")),
+                            R = ToDouble(GetValue<decimal?>(reader, "r_ohm")),
+                            X = ToDouble(GetValue<decimal?>(reader, "x_ohm")),
+                            Gamma_Real = ToDouble(GetValue<decimal?>(reader, "gamma_real")),
+                            Gamma_Imag = ToDouble(GetValue<decimal?>(reader, "gamma_imag")),
+                            VSWR = ToDouble(GetValue<decimal?>(reader, "vswr")),
+                            Z_Text = GetString(reader, "z_text"),
+                            Z_Normalized = GetString(reader, "z_normalized"),
+                            ForwardP_W = ToDouble(GetValue<decimal?>(reader, "forward_p_w")),
+                            ReflectedP_W = ToDouble(GetValue<decimal?>(reader, "reflected_p_w")),
+                            DeliveredP_W = ToDouble(GetValue<decimal?>(reader, "delivered_p_w")),
+                            Ar_Flow = ToDouble(GetValue<decimal?>(reader, "ar_flow")),
+                            O2_Flow = ToDouble(GetValue<decimal?>(reader, "o2_flow")),
+                            APC_Pressure = ToDouble(GetValue<decimal?>(reader, "apc_pressure")),
+                            APC_Position = ToDouble(GetValue<decimal?>(reader, "apc_position")),
+                            VVC1 = ToDouble(GetValue<decimal?>(reader, "vvc1")),
+                            VVC2 = ToDouble(GetValue<decimal?>(reader, "vvc2")),
+                            VVC3 = ToDouble(GetValue<decimal?>(reader, "vvc3")),
+                            Proc_Status = GetValue<short?>(reader, "proc_status") switch
+                            {
+                                null => string.Empty,
+                                0 => "Process Run 정상",
+                                1 => "Heavy alarm",
+                                _ => "Unknown"
+                            },
+                        });
+                    }
+                }
+            }
+
+            return ds ?? new MeasurementDataset { Name = "EMPTY_" + channel, Z0 = z0 };
+        }
+
+        public static List<ProcessStepRecord> GetProcessStepsByRunId(long runId, int stepNum)
+        {
+            string sql = @"
+SELECT step_id, run_id, step_num, step_name, log_date, log_time,
+       srf_freq, s_fwd, s_ref, s_vrms, s_irms, s_phase, s_delivered_pwr,
+       s_preset_load, s_preset_tune, s_load_pos, s_tune_pos,
+       br_freq, b_fwd, b_ref, b_vrms, b_irms, b_phase, b_delivered_pwr,
+       b_preset_load, b_preset_tune, b_load_pos, b_tune_pos,
+       ar_flow, o2_flow, apc_pressure, apc_position, vvc1, vvc2, vvc3, proc_status
+FROM process_step
+WHERE run_id = @run_id AND step_num = @step_num
+ORDER BY step_num ASC;";
+
+
+            if (stepNum == 0)
+            {
+                sql = @"
+SELECT step_id, run_id, step_num, step_name, log_date, log_time,
+       srf_freq, s_fwd, s_ref, s_vrms, s_irms, s_phase, s_delivered_pwr,
+       s_preset_load, s_preset_tune, s_load_pos, s_tune_pos,
+       br_freq, b_fwd, b_ref, b_vrms, b_irms, b_phase, b_delivered_pwr,
+       b_preset_load, b_preset_tune, b_load_pos, b_tune_pos,
+       ar_flow, o2_flow, apc_pressure, apc_position, vvc1, vvc2, vvc3, proc_status
+FROM process_step
+WHERE run_id = @run_id
+ORDER BY step_num ASC;";
+            }
+
+            var result = new List<ProcessStepRecord>();
+
+            using (var conn = CreateConnection())
+            using (var cmd = new NpgsqlCommand(sql, conn))
+            {
+                cmd.Parameters.AddWithValue("run_id", runId);
+                if (stepNum != 0)
+                {
+                    cmd.Parameters.AddWithValue("step_num", stepNum);
+                }
+
+
+                conn.Open();
+
+                using (var reader = cmd.ExecuteReader())
+                {
+                    while (reader.Read())
+                        result.Add(MapProcessStep(reader));
+                }
+            }
+
+            return result;
         }
 
         public static double? GetActiveThreshold(string recipeName, string channel)
@@ -366,6 +522,103 @@ INNER JOIN smith_chart_point p ON p.step_id = s.step_id";
 
             return result;
         }
+
+        /// <summary>
+        /// Recipe name(부분일치), Step, Power(전달전력), 기간(startTime~endTime) 조건으로
+        /// process_run을 검색하여 조건에 맞는 run_name 목록을 반환합니다.
+        /// </summary>
+        /// <param name="recipeName">Recipe name 부분 검색어 (null/빈 값이면 전체 대상)</param>
+        /// <param name="stepNum">특정 Step 번호로 제한 (null이면 전체 Step)</param>
+        /// <param name="minPower">전달 전력(delivered_p_w) 하한 (null이면 제한 없음)</param>
+        /// <param name="maxPower">전달 전력(delivered_p_w) 상한 (null이면 제한 없음)</param>
+        /// <param name="startTime">started_at 하한 (null이면 제한 없음)</param>
+        /// <param name="endTime">ended_at 상한 (null이면 제한 없음)</param>
+        /*public static List<string> SearchProcessRunNames(
+            string recipeName = null,
+            short? stepNum = null,
+            decimal? minPower = null,
+            decimal? maxPower = null,
+            DateTime? startTime = null,
+            DateTime? endTime = null)
+        {
+            var sql = @"
+SELECT DISTINCT r.run_name, r.created_at
+FROM process_run r";
+
+            // Step 또는 Power 조건이 있을 때만 process_step / smith_chart_point 조인
+            var needsStepJoin = stepNum.HasValue || minPower.HasValue || maxPower.HasValue;
+
+            if (needsStepJoin)
+            {
+                sql += @"
+INNER JOIN process_step s ON s.run_id = r.run_id";
+
+                if (minPower.HasValue || maxPower.HasValue)
+                {
+                    sql += @"
+INNER JOIN smith_chart_point p ON p.step_id = s.step_id";
+                }
+            }
+
+            sql += " WHERE 1 = 1";
+
+            if (!string.IsNullOrWhiteSpace(recipeName))
+                sql += " AND r.recipe_name ILIKE @recipe_name";
+
+            if (startTime.HasValue)
+                sql += " AND r.started_at >= @start_time";
+
+            if (endTime.HasValue)
+                sql += " AND r.ended_at <= @end_time";
+
+            if (stepNum.HasValue)
+                sql += " AND s.step_num = @step_num";
+
+            if (minPower.HasValue)
+                sql += " AND p.delivered_p_w >= @min_power";
+
+            if (maxPower.HasValue)
+                sql += " AND p.delivered_p_w <= @max_power";
+
+            sql += " ORDER BY r.created_at DESC, r.run_name ASC;";
+
+            var result = new List<string>();
+
+            using (var conn = CreateConnection())
+            using (var cmd = new NpgsqlCommand(sql, conn))
+            {
+                if (!string.IsNullOrWhiteSpace(recipeName))
+                    cmd.Parameters.AddWithValue("recipe_name", $"%{recipeName}%");
+
+                if (startTime.HasValue)
+                    cmd.Parameters.AddWithValue("start_time", startTime.Value);
+
+                if (endTime.HasValue)
+                    cmd.Parameters.AddWithValue("end_time", endTime.Value);
+
+                if (stepNum.HasValue)
+                    cmd.Parameters.AddWithValue("step_num", stepNum.Value);
+
+                if (minPower.HasValue)
+                    cmd.Parameters.AddWithValue("min_power", minPower.Value);
+
+                if (maxPower.HasValue)
+                    cmd.Parameters.AddWithValue("max_power", maxPower.Value);
+
+                conn.Open();
+
+                using (var reader = cmd.ExecuteReader())
+                {
+                    while (reader.Read())
+                    {
+                        result.Add(GetString(reader, "run_name"));
+                    }
+                }
+            }
+
+            return result;
+        }
+        */
 
         public static List<ProcessRunRecord> GetProcessRuns()
         {
