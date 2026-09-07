@@ -9,13 +9,14 @@ using System;
 using System.Collections.Generic;
 using System.Drawing;
 using System.IO;
+using System.Runtime.InteropServices;
 using System.Runtime.Remoting.Channels;
+using System.Threading;
 using System.Threading.Tasks;
 using System.Windows.Forms;
 using System.Xml.Linq;
 //using Iruza.Anomaly;
 using Iruza.src.Parameter;
-using System.Runtime.InteropServices;
 using CheckBoxState = System.Windows.Forms.VisualStyles.CheckBoxState;
 
 namespace Iruza
@@ -23,7 +24,13 @@ namespace Iruza
     public class MainShell : Form
     {
         private TabControl _tabs;
-        private TreeView _tree; 
+        private TreeView _tree;
+
+        // ── 로딩 오버레이 (별도 스레드 기반) ──
+        private Thread _loadingThread;
+        private LoadingOverlayForm _loadingForm;
+        private readonly object _loadingLock = new object();
+
 
         private Panel _leftPanel;
         private Panel _loadingOverlay;
@@ -254,7 +261,7 @@ namespace Iruza
             _loadingOverlay.BringToFront();
         }
 
-        void ShowLoading(string message = "Loading...")
+       /* void ShowLoading(string message = "Loading...")
         {
             if (_loadingLabel != null)
                 _loadingLabel.Text = message;
@@ -268,62 +275,123 @@ namespace Iruza
 
             UseWaitCursor = true;
             Cursor = Cursors.WaitCursor;
+        }*/
+
+        // ── 로딩 오버레이 (별도 스레드) ──────────────────────────────
+        // 메인 UI 스레드가 차트 렌더링 등으로 오래 블로킹되어도,
+        // LoadingOverlayForm은 자기만의 Application.Run 메시지 루프에서
+        // 돌아가기 때문에 Marquee 애니메이션이 멈추지 않는다.
+        void ShowLoading(string message = "Loading...")
+        {
+            lock (_loadingLock)
+            {
+                if (_loadingThread != null && _loadingThread.IsAlive)
+                {
+                    _loadingForm?.UpdateMessage(message);
+                    return;
+                }
+
+                // 메인 폼 위에 겹칠 위치/크기를 UI 스레드에서 미리 계산해 넘겨준다
+                // (Rectangle은 값 타입이라 스레드 간 전달에 문제 없음)
+                var screenBounds = RectangleToScreen(ClientRectangle);
+                var ready = new ManualResetEvent(false);
+
+                _loadingThread = new Thread(() =>
+                {
+                    _loadingForm = new LoadingOverlayForm(screenBounds, message);
+                    _loadingForm.HandleCreated += (s, e) => ready.Set();
+                    Application.Run(_loadingForm);
+                });
+                _loadingThread.IsBackground = true;
+                _loadingThread.SetApartmentState(ApartmentState.STA);
+                _loadingThread.Start();
+
+                ready.WaitOne(1000); // 폼 핸들 생성될 때까지 살짝 대기 (선택 사항)
+            }
+
+            UseWaitCursor = true;
+            Cursor = Cursors.WaitCursor;
         }
 
-        void HideLoading()
+        /*void HideLoading()
         {
             UseWaitCursor = false;
             Cursor = Cursors.Default;
 
             if (_loadingOverlay != null)
                 _loadingOverlay.Visible = false;
+        }*/
+
+        void HideLoading()
+        {
+            UseWaitCursor = false;
+            Cursor = Cursors.Default;
+
+            lock (_loadingLock)
+            {
+                if (_loadingForm != null && !_loadingForm.IsDisposed)
+                {
+                    try
+                    {
+                        _loadingForm.Invoke(new Action(() =>
+                        {
+                            Application.ExitThread(); // 이 스레드의 Application.Run 종료
+                        }));
+                    }
+                    catch (ObjectDisposedException) { }
+                    catch (InvalidOperationException) { }
+                }
+
+                _loadingThread = null;
+                _loadingForm = null;
+            }
         }
 
-       /* List<LoadedRunData> LoadCheckedRunData(List<string> checkedRunNames)
-        {
-            var result = new List<LoadedRunData>();
-            var detector = new Demo();
+        /* List<LoadedRunData> LoadCheckedRunData(List<string> checkedRunNames)
+         {
+             var result = new List<LoadedRunData>();
+             var detector = new Demo();
 
-            foreach (var name in checkedRunNames)
-            {
-                var processRun = MeasurementDb.GetProcessRunByName(name);
-                if (processRun == null)
-                    continue;
+             foreach (var name in checkedRunNames)
+             {
+                 var processRun = MeasurementDb.GetProcessRunByName(name);
+                 if (processRun == null)
+                     continue;
 
-                var processSteps = MeasurementDb.GetProcessStepsByRunId(processRun.RunId);
-                var sourceDataset = MeasurementDb.GetMeasurementDatasetByRunId(processRun.RunId, "source", 50, processSteps);
-                var biasDataset = MeasurementDb.GetMeasurementDatasetByRunId(processRun.RunId, "bias", 50, processSteps);
+                 var processSteps = MeasurementDb.GetProcessStepsByRunId(processRun.RunId);
+                 var sourceDataset = MeasurementDb.GetMeasurementDatasetByRunId(processRun.RunId, "source", 50, processSteps);
+                 var biasDataset = MeasurementDb.GetMeasurementDatasetByRunId(processRun.RunId, "bias", 50, processSteps);
 
-                var sourceSteps = MeasurementDb.GetImpedanceStepsByRunId(processRun.RunId, "source");
-                var biasSteps = MeasurementDb.GetImpedanceStepsByRunId(processRun.RunId, "bias");
+                 var sourceSteps = MeasurementDb.GetImpedanceStepsByRunId(processRun.RunId, "source");
+                 var biasSteps = MeasurementDb.GetImpedanceStepsByRunId(processRun.RunId, "bias");
 
-                double sourceThreshold = Convert.ToDouble(MeasurementDb.GetActiveThreshold(processRun.RecipeName, "source"));
-                double biasThreshold = Convert.ToDouble(MeasurementDb.GetActiveThreshold(processRun.RecipeName, "bias"));
-
-
-                Demo itest = new Demo();
-
-                List<ImpedanceStepData> iSImpedanceStepData = new List<ImpedanceStepData>();
-                //string iSourceStatus = "";
-                List<ImpedanceStepData> iBImpedanceStepData = new List<ImpedanceStepData>();
-
-                //iSourceStatus
-               // string iSourceStatus = itest.Run(iSImpedanceStepData, 0.55, 0.45, sourceThreshold);
-               // string iBourceStatus = itest.Run(iBImpedanceStepData, 0.55, 0.45, biasThreshold);
+                 double sourceThreshold = Convert.ToDouble(MeasurementDb.GetActiveThreshold(processRun.RecipeName, "source"));
+                 double biasThreshold = Convert.ToDouble(MeasurementDb.GetActiveThreshold(processRun.RecipeName, "bias"));
 
 
-                result.Add(new LoadedRunData
-                {
-                    Name = name,
-                    SourceDataset = sourceDataset,
-                    BiasDataset = biasDataset,
-                    SourceStatus = detector.Run(sourceSteps, 0.55, 0.45, sourceThreshold),
-                    BiasStatus = detector.Run(biasSteps, 0.55, 0.45, biasThreshold)
-                });
-            }
+                 Demo itest = new Demo();
 
-            return result;
-        }*/
+                 List<ImpedanceStepData> iSImpedanceStepData = new List<ImpedanceStepData>();
+                 //string iSourceStatus = "";
+                 List<ImpedanceStepData> iBImpedanceStepData = new List<ImpedanceStepData>();
+
+                 //iSourceStatus
+                // string iSourceStatus = itest.Run(iSImpedanceStepData, 0.55, 0.45, sourceThreshold);
+                // string iBourceStatus = itest.Run(iBImpedanceStepData, 0.55, 0.45, biasThreshold);
+
+
+                 result.Add(new LoadedRunData
+                 {
+                     Name = name,
+                     SourceDataset = sourceDataset,
+                     BiasDataset = biasDataset,
+                     SourceStatus = detector.Run(sourceSteps, 0.55, 0.45, sourceThreshold),
+                     BiasStatus = detector.Run(biasSteps, 0.55, 0.45, biasThreshold)
+                 });
+             }
+
+             return result;
+         }*/
 
         List<LoadedRunData> LoadCheckedRunData(List<string> checkedRunNames)
         {
@@ -383,8 +451,6 @@ namespace Iruza
 
             mFile.DropDownItems.Add("파라미터 설정", null, (s, e) =>
             {
-                GetDataViewer()?.SaveChartPng();
-
                 //_ParaDlg = new ParameterForm(_root);
 
                 _ParaDlg = new ParameterForm(_root);
@@ -615,7 +681,7 @@ namespace Iruza
                 try
                 {
                     btnSearch.Enabled = false;
-                    ShowLoading("Loading...");
+                    ShowLoading("Smith Chart 데이터 Loading...");
 
                     var loadedRuns = await Task.Run(() => LoadCheckedRunData(checkedRunNames));
 
