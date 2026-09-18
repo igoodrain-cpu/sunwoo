@@ -759,8 +759,7 @@ namespace Iruza
                         MeasurementDb.SaveCalibratedThreshold(irecipeName, "bias", biasThreshold, 97.0, goldenRunIds.Count, goldenRunIds, "UserA");
                     });
 
-                    MessageBox.Show("LEARNING이 완료 되었습니다.", "LEARNING",
-                        MessageBoxButtons.OK, MessageBoxIcon.Information);
+
                 }
                 catch (Exception ex)
                 {
@@ -772,6 +771,9 @@ namespace Iruza
                     HideLoading();
                     btnSearch.Enabled = true;
                     btnLearning.Enabled = true;
+
+                    MessageBox.Show("LEARNING이 완료 되었습니다.", "LEARNING",
+                    MessageBoxButtons.OK, MessageBoxIcon.Information);
                 }
             };
 
