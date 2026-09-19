@@ -150,9 +150,11 @@ namespace Iruza
         }
 
         /// <summary>
-        /// Method A + Method D를 가중 평균하여 최종 이상 스코어와 라벨을 산출합니다.
-        /// 데이터가 더 쌓이면 여기에 Method B(Mahalanobis), C(Isolation Forest) 점수를
-        /// 추가로 곱-가중하면 됩니다 (Python 프로토타입 참고).
+        /// [FIX] 기존에는 DetectAnomalies()와 완전히 동일한 로직이 그대로 복사되어 있어
+        /// 유지보수 시 한쪽만 수정되고 다른 쪽은 누락되는 사고가 나기 쉬웠습니다.
+        /// 지금은 DetectAnomalies()를 그대로 위임 호출하도록 통합했습니다.
+        /// 추후 Method B(Mahalanobis)/C(Isolation Forest) 등 AI 기반 점수를 추가할 때
+        /// 이 메서드 내부에서만 확장하면 됩니다 (호출부는 변경할 필요 없음).
         /// </summary>
         public static List<AnomalyResult> DetectAnomaliesAI(
             IReadOnlyList<ImpedanceStepData> steps,
@@ -161,32 +163,9 @@ namespace Iruza
             double threshold = 0.5,
             Func<ImpedanceStepData, double> cusumField = null)
         {
-            if (steps == null || steps.Count == 0)
-                return new List<AnomalyResult>();
-
-            cusumField ??= s => s.VSWR;
-
-            double wSum = weightDelta + weightCusum;
-            double wA = weightDelta / wSum;
-            double wD = weightCusum / wSum;
-
-            var scoreA = ComputeStepDeltaZScore(steps);
-            var scoreD = ComputeCusum(steps, cusumField);
-
-            var results = new List<AnomalyResult>(steps.Count);
-            for (int i = 0; i < steps.Count; i++)
-            {
-                double final = wA * scoreA[i] + wD * scoreD[i];
-                results.Add(new AnomalyResult
-                {
-                    Step = steps[i].Step,
-                    ScoreDelta = scoreA[i],
-                    ScoreCusum = scoreD[i],
-                    AnomalyScore = final,
-                    IsAbnormal = final >= threshold
-                });
-            }
-            return results;
+            // TODO: 데이터가 더 쌓이면 여기에 Method B/C 점수를 추가로 곱-가중하여
+            //       DetectAnomalies()의 규칙 기반 결과와 결합하세요.
+            return DetectAnomalies(steps, weightDelta, weightCusum, threshold, cusumField);
         }
 
         /// <summary>
@@ -287,22 +266,14 @@ namespace Iruza
             }
             return "NORMAL";
         }
+
+        /// <summary>
+        /// [FIX] 기존에는 하드코딩된 샘플 steps를 만들어 놓고 실제로는 사용하지 않은 채
+        /// 파라미터로 받은 pImpedanceStepData만 사용하는 죽은 코드(dead code)가 있었습니다.
+        /// 혼란을 막기 위해 샘플 데이터 블록을 제거하고 파라미터만 사용하도록 정리했습니다.
+        /// </summary>
         public void Learning(List<ImpedanceStepData> pImpedanceStepData)
         {
-            // Python 샘플 데이터(Bias 궤적)와 동일한 값 - Step 7이 이상치여야 함
-            var steps = new List<ImpedanceStepData>
-            {
-                new ImpedanceStepData { Step = 1, R = 20.7, X =  0.39, Vout =  5.39, Iout = 0.26, VSWR = 2.412 },
-                new ImpedanceStepData { Step = 2, R = 22.9, X = -0.48, Vout = 25.24, Iout = 1.10, VSWR = 2.180 },
-                new ImpedanceStepData { Step = 3, R = 22.6, X =  0.78, Vout = 23.01, Iout = 1.02, VSWR = 2.218 },
-                new ImpedanceStepData { Step = 4, R = 24.9, X =  0.35, Vout = 26.63, Iout = 1.07, VSWR = 2.009 },
-                new ImpedanceStepData { Step = 5, R = 26.5, X =  0.86, Vout = 26.40, Iout = 0.99, VSWR = 1.888 },
-                new ImpedanceStepData { Step = 6, R = 26.1, X = -1.72, Vout = 25.66, Iout = 0.98, VSWR = 1.917 },
-                new ImpedanceStepData { Step = 7, R = 12.8, X =  0.11, Vout =  0.51, Iout = 0.04, VSWR = 3.922 }, // 이상치
-                new ImpedanceStepData { Step = 8, R = 27.4, X =  0.29, Vout =  4.39, Iout = 0.16, VSWR = 1.823 },
-                new ImpedanceStepData { Step = 9, R = 18.2, X =  0.21, Vout =  4.55, Iout = 0.25, VSWR = 2.747 },
-            };
-
             var results = ImpedanceAnomalyDetector.DetectAnomaliesAI(pImpedanceStepData);
 
             Console.WriteLine($"{"Step",5} {"ScoreDelta",12} {"ScoreCusum",12} {"AnomalyScore",13} {"Label",10}");

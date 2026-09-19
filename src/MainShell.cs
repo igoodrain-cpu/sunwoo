@@ -392,50 +392,67 @@ namespace Iruza
 
              return result;
          }*/
-
+        // [FIX] 기존 버전은 SourceDataset/BiasDataset만 채우고 SourceStatus/BiasStatus를
+        // 전혀 계산하지 않았습니다. 그 결과 VIEW 버튼을 눌러도 ImpedanceAnomalyDetector
+        // (Z-score + CUSUM)가 호출되지 않고, LEARNING에서 계산/저장한 calibrated threshold
+        // (MeasurementDb.SaveCalibratedThreshold)도 전혀 읽어오지 않아 스미스 차트 패널에는
+        // 항상 빈(null) 상태만 전달되고 있었습니다. 아래에서 이 부분을 복원했습니다.
         List<LoadedRunData> LoadCheckedRunData(List<string> checkedRunNames)
         {
             var result = new List<LoadedRunData>();
-            //var detector = new Demo();
+            var detector = new Demo();
 
             foreach (var name in checkedRunNames)
             {
                 var processRun = MeasurementDb.GetProcessRunByName(name);
                 if (processRun == null)
                     continue;
-
+                MeasurementDataset sourceDataset;
+                MeasurementDataset biasDataset;
 
                 if (_ParaDlg != null)
                 {
                     var processSteps = MeasurementDb.GetProcessStepsByRunId(processRun.RunId, _ParaDlg.getStepNum());
-                    var sourceDataset = MeasurementDb.GetMeasurementDatasetByRunId(processRun.RunId, "source", _ParaDlg.getStepNum(), _ParaDlg.getPowerMin(), _ParaDlg.getPowerMax(), 50);
-                    var biasDataset = MeasurementDb.GetMeasurementDatasetByRunId(processRun.RunId, "bias", _ParaDlg.getStepNum(), _ParaDlg.getPowerMin(), _ParaDlg.getPowerMax(), 50);
-
-                    result.Add(new LoadedRunData
-                    {
-                        Name = name,
-                        SourceDataset = sourceDataset,
-                        BiasDataset = biasDataset,
-                    });
+                    sourceDataset = MeasurementDb.GetMeasurementDatasetByRunId(processRun.RunId, "source", _ParaDlg.getStepNum(), _ParaDlg.getPowerMin(), _ParaDlg.getPowerMax(), 50);
+                    biasDataset = MeasurementDb.GetMeasurementDatasetByRunId(processRun.RunId, "bias", _ParaDlg.getStepNum(), _ParaDlg.getPowerMin(), _ParaDlg.getPowerMax(), 50);
                 }
                 else
                 {
-
                     var processSteps = MeasurementDb.GetProcessStepsByRunId(processRun.RunId, _stepNum);
-                    var sourceDataset = MeasurementDb.GetMeasurementDatasetByRunId(processRun.RunId, "source", _stepNum, _minPower, _maxPower, 50);
-                    var biasDataset = MeasurementDb.GetMeasurementDatasetByRunId(processRun.RunId, "bias", _stepNum, _minPower, _maxPower, 50);
+                    sourceDataset = MeasurementDb.GetMeasurementDatasetByRunId(processRun.RunId, "source", _stepNum, _minPower, _maxPower, 50);
+                    biasDataset = MeasurementDb.GetMeasurementDatasetByRunId(processRun.RunId, "bias", _stepNum, _minPower, _maxPower, 50);
+                }
+                // ── [FIX] LEARNING에서 저장한 threshold를 읽어와 규칙 기반 Z-score + CUSUM으로
+                //          Normal/Abnormal을 판정한다 (Learning 결과를 View에 실제로 반영) ──
+                string sourceStatus = "N/A";
+                string biasStatus = "N/A";
 
-                    result.Add(new LoadedRunData
-                    {
+                var sourceSteps = MeasurementDb.GetImpedanceStepsByRunId(processRun.RunId, "source");
+                var biasSteps = MeasurementDb.GetImpedanceStepsByRunId(processRun.RunId, "bias");
+
+                var rawSourceThreshold = MeasurementDb.GetActiveThreshold(processRun.RecipeName, "source");
+                var rawBiasThreshold = MeasurementDb.GetActiveThreshold(processRun.RecipeName, "bias");
+
+                // Method A/D는 스텝 간 델타를 사용하므로 최소 2 스텝 필요.
+                // threshold가 없으면(=해당 레시피/채널에 LEARNING을 아직 한 번도 돌리지 않음)
+                // 판정을 시도하지 않고 "N/A"로 표시해 사용자가 원인을 알 수 있게 한다.
+                if (sourceSteps.Count >= 2 && rawSourceThreshold != null)
+                    sourceStatus = detector.Run(sourceSteps, 0.55, 0.45, Convert.ToDouble(rawSourceThreshold));
+
+                if (biasSteps.Count >= 2 && rawBiasThreshold != null)
+                    biasStatus = detector.Run(biasSteps, 0.55, 0.45, Convert.ToDouble(rawBiasThreshold));
+
+                result.Add(new LoadedRunData
+                {
                         Name = name,
                         SourceDataset = sourceDataset,
                         BiasDataset = biasDataset,
-                    });
-                }
-
+                        SourceStatus = sourceStatus,
+                        BiasStatus = biasStatus
+                 });
             }
 
-            return result;
+                return result;
         }
 
         // ── 메뉴바 ──

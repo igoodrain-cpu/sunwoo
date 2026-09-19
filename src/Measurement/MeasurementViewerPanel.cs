@@ -137,7 +137,7 @@ namespace Iruza
                 _dsList[_dsList.Count - 1].Name = _dsList[_dsList.Count - 1].Name + "(NORMAL)";
 
             }
-            else
+            else if(pStatus == "ABNORMAL")    
             {
                 _dsList[_dsList.Count - 1].Name = _dsList[_dsList.Count - 1].Name + "(ABNORMAL)";
             }
