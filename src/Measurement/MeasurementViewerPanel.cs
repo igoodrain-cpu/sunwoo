@@ -55,17 +55,6 @@ namespace Iruza
         {
             BackColor = Color.White;
 
-       /*     if(pInit == false)
-            {
-                var initial = (i == 0)
-                ? MeasurementDataset.CreateSample("Test1")
-                : MeasurementDataset.CreateSampleBt("Test2");
-
-                _dsList = new List<MeasurementDataset> { initial };
-                _activeDsIndex = 0;
-                _selectedDsIndices = new List<int> { 0 };
-            }*/
-
             BuildLayout();
             RefreshDatasetList();
             RefreshAll();
@@ -87,8 +76,6 @@ namespace Iruza
             }
                            
 
-            //AddDataset(new MeasurementDataset { Z0 = 50, Name = $"Dataset{_dsList.Count + 1}" });
-
             foreach (MeasurementDataset dataset in _dsList)
             {
                 string name = dataset.Name;
@@ -103,12 +90,6 @@ namespace Iruza
 
             if (_dsList.Count == 0)
             {
-                // List<MeasurementDataset> _dsList = new List<MeasurementDataset>();에 아무데이터도 없을시 MeasurementDataset initial = new MeasurementDataset();를 생성하여 _dsList에 추가
-                //  var initial = (i == 0)
-                //  ? MeasurementDataset.CreateSample(pName)
-                // : MeasurementDataset.CreateSampleBt(pName);
-
-                // _dsList = new List<MeasurementDataset> { initial };
 
                 var initial = new MeasurementDataset();
                 initial = pMeasurementDataset;
@@ -125,10 +106,6 @@ namespace Iruza
                 //AddDataset(new MeasurementDataset { Z0 = 50, Name = pName });
             }
 
-
-            //AddDataset(new MeasurementDataset { Z0 = 50, Name = pName });
-
-            //BuildLayout();
             RefreshDatasetList();
             RefreshAll();
         }
@@ -136,10 +113,6 @@ namespace Iruza
         public void OverlappedChart(int i, TreeNode root , string pName)
         {
             BackColor = Color.White;
-
-
-
-            //AddDataset(new MeasurementDataset { Z0 = 50, Name = $"Dataset{_dsList.Count + 1}" });
 
             foreach (MeasurementDataset dataset in _dsList)
             {
@@ -155,7 +128,6 @@ namespace Iruza
 
             if(_dsList.Count == 0)
             {
-                // List<MeasurementDataset> _dsList = new List<MeasurementDataset>();에 아무데이터도 없을시 MeasurementDataset initial = new MeasurementDataset();를 생성하여 _dsList에 추가
                 var initial = (i == 0)
                 ? MeasurementDataset.CreateSample(pName)
                 : MeasurementDataset.CreateSampleBt(pName);
@@ -171,10 +143,6 @@ namespace Iruza
                 AddDataset(new MeasurementDataset { Z0 = 50, Name = pName });
             }
 
-
-            //AddDataset(new MeasurementDataset { Z0 = 50, Name = pName });
-
-            //BuildLayout();
             RefreshDatasetList();
             RefreshAll();
         }
@@ -228,6 +196,16 @@ namespace Iruza
             RefreshAll();
         }
 
+        public void ClearDatasets()
+        {
+            _dsList.Clear();
+            _selectedDsIndices.Clear();
+            _activeDsIndex = -1;
+            _activeIdx = -1;
+            RefreshDatasetList();
+            RefreshAll();
+        }
+
         // [ADD] 빈 데이터셋을 새로 만들어 리스트에 추가하고 활성화 (툴바 "데이터셋 추가" 버튼)
         void AddDataset()
         {
@@ -240,8 +218,6 @@ namespace Iruza
             if (_activeDsIndex < 0 || _activeDsIndex >= _dsList.Count) return;
             int removed = _activeDsIndex;
             _dsList.RemoveAt(removed);
-           // if (_dsList.Count == 0)
-           //     _dsList.Add(MeasurementDataset.CreateSample(_dsList.));
 
             // 삭제된 인덱스 이후 항목들의 인덱스를 1씩 당겨서 선택 목록 재정렬
             _selectedDsIndices = _selectedDsIndices
@@ -496,17 +472,12 @@ namespace Iruza
                 tb.Items.Add(b);
             }
 
-            Btn("CSV 가져오기", ImportCsv);
-            tb.Items.Add(new ToolStripSeparator());
             Btn("CSV 내보내기", ExportCsv);
-            //Btn("스텝 추가", AddManual);
-            //Btn("선택 삭제", DeleteSelected);
+
             tb.Items.Add(new ToolStripSeparator());
             Btn("차트 저장 PNG", SaveChartPng);
             tb.Items.Add(new ToolStripSeparator());
-           // Btn("데이터셋 추가", AddDataset);
-           // Btn("데이터셋 삭제", RemoveDataset);
-           // tb.Items.Add(new ToolStripSeparator());
+
             tb.Items.Add(new ToolStripLabel("  색상: "));
             _cbColor = new ComboBox
             {
@@ -535,7 +506,7 @@ namespace Iruza
             };
 
             var cols = new[]{
-                ("Step","#",true),("Vout_Vrms","Vout\nVrms",true),
+                ("Step","#",true),("Step_Name","Step Name",true),("Vout_Vrms","Vout\nVrms",true),
                 ("Iout_Arms","Iout\nArms",true),("Phase_deg","θ\ndeg",true),
                 ("R","R Ω",true),("X","X Ω",true),
                 ("Gamma_Real","Γ real",true),("Gamma_Imag","Γ imag",true),
@@ -575,22 +546,17 @@ namespace Iruza
             foreach (var s in _ds.Steps)
             {
                 _grid.Rows.Add(
-                    s.Step, s.Vout_Vrms.ToString("F4"), s.Iout_Arms.ToString("F4"),
+                    s.Step, s.Step_Name, s.Vout_Vrms.ToString("F4"),s.Iout_Arms.ToString("F4"),
                     s.Phase_deg.ToString("F2"), s.R.ToString("F4"), s.X.ToString("F4"),
                     s.Gamma_Real.ToString("F6"), s.Gamma_Imag.ToString("F6"),
                     s.GammaMag.ToString("F6"), s.VSWR.ToString("F3"),
                     s.Z_Text, s.Z_Normalized,
                     s.ForwardP_W.ToString("F4"), s.ReflectedP_W.ToString("F4"),
                     s.DeliveredP_W.ToString("F4"), s.ReturnLoss_dB.ToString("F2"),
-                    s.Efficiency_pct.ToString("F1"),s.Ar_Flow.ToString("F1"), s.O2_Flow.ToString("F1"),
+                    s.Efficiency_pct.ToString("F1"),s.Vdc.ToString("F4"), s.Ar_Flow.ToString("F1"), s.O2_Flow.ToString("F1"),
                     s.APC_Pressure.ToString("F2"), s.APC_Position.ToString("F2"), s.VVC1.ToString("F2"), s.VVC2.ToString("F2"), s.VVC3.ToString("F2"),s.Proc_Status
                 );
                 var row = _grid.Rows[_grid.Rows.Count - 1];
-                Color vc = s.VSWR < 1.5
-                    ? Color.FromArgb(20, 0, 180, 0)
-                    : s.VSWR < 2.5 ? Color.FromArgb(20, 220, 180, 0)
-                    : Color.FromArgb(20, 220, 0, 0);
-                row.Cells[9].Style.BackColor = vc;
             }
         }
 
@@ -639,6 +605,7 @@ namespace Iruza
                     ms.ForwardP_W = d;
                     ms.ReflectedP_W = ms.ForwardP_W * ms.GammaMag * ms.GammaMag; break;
                 case "DeliveredP_W": ms.DeliveredP_W = d; break;
+                case "Vdc": ms.Vdc = d; break;
                 case "Ar_Flow": ms.Ar_Flow = d; break;
                 case "O2_Flow": ms.O2_Flow = d; break;
                 case "APC_Pressure": ms.APC_Pressure = d; break;
@@ -689,6 +656,12 @@ namespace Iruza
             Color.FromArgb(180, 90, 180),  // 보라
             Color.FromArgb(210, 160, 40),  // 금색
             Color.FromArgb(40, 175, 175),  // 청록
+            Color.FromArgb(175, 40, 175),  // 자주
+            Color.FromArgb(200, 100, 50),  // 주황
+            Color.FromArgb(40, 175, 175),  // 청록
+            Color.FromArgb(175, 40, 175),  // 자주
+            Color.FromArgb(58, 6, 3),  // 진한빨강
+            Color.FromArgb(23, 54, 118),  // 청록
         };
 
         private class Overlay
@@ -776,9 +749,6 @@ namespace Iruza
             float cx = Width / 2f, cy = Height / 2f, rad = Math.Min(cx, cy) - 36;
             DrawGrid(g, cx, cy, rad);
             // [CHG] 체크된 모든 데이터셋을 순서대로 겹쳐 그림
-            //foreach (var ov in _overlays)
-            //    if (ov.Ds != null && ov.Ds.Steps.Any())
-            //        DrawData(g, cx, cy, rad, ov);
             DrawLegend(g);   // [ADD] 2개 이상 겹칠 때 데이터셋 범례 표시
 
             // [CHG] 체크된 모든 데이터셋을 순서대로 겹쳐 그림
@@ -911,6 +881,7 @@ namespace Iruza
             {
                 $"[{ov.Name}]",
                 $"Step {s.Step}",
+                $"Step Name = {s.Step_Name}",
                 $"Z = {s.Z_Text}",
                 $"|Γ| = {s.GammaMag:F4}",
                 $"VSWR = {s.VSWR:F3}",
@@ -920,11 +891,12 @@ namespace Iruza
                 $"θ = {s.Phase_deg:F1}°",
                 $"Fwd = {s.ForwardP_W:F2} W",
                 $"Del = {s.DeliveredP_W:F2} W",
+                $"Vdc = {s.Vdc:F4} V",
                 $"η = {s.Efficiency_pct:F1}%",
                 $"Reflected = {s.ReflectedP_W:F1} W",
                 $"ArFlow = {s.Ar_Flow:F2} sccm",
                 $"O2Flow = {s.O2_Flow:F2} sccm",
-                $"APC Pressure = {s.APC_Pressure:F2} Torr",
+                $"APC Pressure = {s.APC_Pressure:F2} mTorr",
                 $"APC Position = {s.APC_Position:F2} %",
                 $"VVC1 = {s.VVC1:F2} pF",
                 $"VVC2 = {s.VVC2:F2} pF",
@@ -951,9 +923,6 @@ namespace Iruza
             g.Clear(Color.White);
             float cx = w / 2f, cy = h / 2f, rad = Math.Min(cx, cy) - 50;
             DrawGrid(g, cx, cy, rad);
-           // foreach (var ov in _overlays)
-           //     if (ov.Ds != null && ov.Ds.Steps.Any())
-           //         DrawData(g, cx, cy, rad, ov);
             DrawLegend(g);
             foreach (var ov in _overlays)
                 if (ov.Ds != null && ov.Ds.Steps.Any())
@@ -1077,6 +1046,7 @@ namespace Iruza
             Result = new MeasurementStep
             {
                 Step = (int)_nStep.Value,
+                Step_Name = _nStep.Name,
                 Vout_Vrms = (double)_nVout.Value,
                 Iout_Arms = (double)_nIout.Value,
                 Phase_deg = (double)_nPhase.Value,

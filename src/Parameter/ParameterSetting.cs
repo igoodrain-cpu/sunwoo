@@ -11,6 +11,11 @@ namespace Iruza.src.Parameter
     {
         public DateTime? StartTime { get; set; }
         public DateTime? EndTime { get; set; }
+        public string RecipeName { get; set; }
+        public short? StepNum { get; set; }
+        public decimal? MinPower { get; set; }
+        public decimal? MaxPower { get; set; }
+        public SensorType? Sensor { get; set; }
 
         public static ParameterSetting Load(string filePath)
         {
@@ -27,7 +32,17 @@ namespace Iruza.src.Parameter
                 StartTime = ParseDateTime(GetValue(values,
                     "StartTime", "startTime", "StartDateTime", "startDateTime", "시작시간", "시작일시")),
                 EndTime = ParseDateTime(GetValue(values,
-                    "EndTime", "endTime", "EndDateTime", "endDateTime", "끝시간", "종료시간", "종료일시"))
+                    "EndTime", "endTime", "EndDateTime", "endDateTime", "끝시간", "종료시간", "종료일시")),
+                RecipeName = GetValue(values,
+                    "RecipeName", "recipeName", "레시피명"),
+                StepNum = ParseShort(GetValue(values,
+                    "StepNum", "stepNum", "Step", "step")),
+                MinPower = ParseDecimal(GetValue(values,
+                    "MinPower", "minPower")),
+                MaxPower = ParseDecimal(GetValue(values,
+                    "MaxPower", "maxPower")),
+                Sensor = ParseSensorType(GetValue(values,
+                    "SensorType", "sensorType", "Sensor", "sensor"))
             };
         }
 
@@ -37,7 +52,12 @@ namespace Iruza.src.Parameter
             var json = serializer.Serialize(new Dictionary<string, string>
             {
                 ["StartTime"] = (StartTime ?? DateTime.Now.AddDays(-14)).ToString("yyyy-MM-ddTHH:mm:ss", CultureInfo.InvariantCulture),
-                ["EndTime"] = (EndTime ?? DateTime.Now).ToString("yyyy-MM-ddTHH:mm:ss", CultureInfo.InvariantCulture)
+                ["EndTime"] = (EndTime ?? DateTime.Now).ToString("yyyy-MM-ddTHH:mm:ss", CultureInfo.InvariantCulture),
+                ["RecipeName"] = RecipeName ?? string.Empty,
+                ["StepNum"] = StepNum.HasValue ? StepNum.Value.ToString(CultureInfo.InvariantCulture) : string.Empty,
+                ["MinPower"] = MinPower.HasValue ? MinPower.Value.ToString(CultureInfo.InvariantCulture) : string.Empty,
+                ["MaxPower"] = MaxPower.HasValue ? MaxPower.Value.ToString(CultureInfo.InvariantCulture) : string.Empty,
+                ["SensorType"] = Sensor.HasValue && Sensor.Value != SensorType.None ? Sensor.Value.ToString() : string.Empty
             });
 
             var directory = Path.GetDirectoryName(filePath);
@@ -72,6 +92,46 @@ namespace Iruza.src.Parameter
             return null;
         }
 
+        private static short? ParseShort(string value)
+        {
+            if (string.IsNullOrWhiteSpace(value))
+                return null;
+
+            if (short.TryParse(value, NumberStyles.Integer, CultureInfo.InvariantCulture, out var s))
+                return s;
+
+            return null;
+        }
+
+        private static decimal? ParseDecimal(string value)
+        {
+            if (string.IsNullOrWhiteSpace(value))
+                return null;
+
+            if (decimal.TryParse(value, NumberStyles.Number, CultureInfo.InvariantCulture, out var d))
+                return d;
+
+            return null;
+        }
+        /// <summary>
+        /// "Input" / "Output" (대소문자 무시) 또는 숫자 1 / 2 를 SensorType으로 변환합니다.
+        /// 비어 있거나 알 수 없는 값이면 null을 반환합니다.
+        /// </summary>
+        private static SensorType? ParseSensorType(string value)
+        {
+            if (string.IsNullOrWhiteSpace(value))
+                return null;
+
+            if (Enum.TryParse(value.Trim(), true, out SensorType sensor) &&
+                Enum.IsDefined(typeof(SensorType), sensor) &&
+                sensor != SensorType.None)
+            {
+                return sensor;
+            }
+
+            return null;
+        }
+
         private static string FormatJson(string json)
         {
             return json
@@ -79,5 +139,15 @@ namespace Iruza.src.Parameter
                 .Replace("\",\"", "\",\r\n  \"")
                 .Replace("\"}", "\"\r\n}");
         }
+
+        public override string ToString()
+        {
+            return $"StartTime: {StartTime}, EndTime: {EndTime}, RecipeName: {RecipeName}, StepNum: {StepNum}, MinPower: {MinPower}, MaxPower: {MaxPower}, SensorType: {Sensor}";
+        } 
+        
+        public short GetStepnum()
+        {
+            return StepNum ?? 0;
+        }   
     }
 }
