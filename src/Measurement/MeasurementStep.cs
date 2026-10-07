@@ -2,6 +2,7 @@
 //  MeasurementStep.cs  –  측정 스텝 데이터 모델 (15 컬럼)
 //  컬럼: Step, Vout, Iout, Phase, R, X, Γr, Γi, |Γ|, VSWR,
 //         Z text, z normalized, Fwd P, Ref P, Del P
+//  만든이: 이선우
 // ════════════════════════════════════════════════════════════════
 using System;
 using System.Numerics;
@@ -9,6 +10,7 @@ using static System.Windows.Forms.VisualStyles.VisualStyleElement;
 
 namespace Iruza
 {
+    // 한 공정 단계의 원시 측정값과 계산된 임피던스·전력 값을 보관합니다.
     public class MeasurementStep
     {
         // ── 원시 측정값 ──

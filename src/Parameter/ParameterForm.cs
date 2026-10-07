@@ -1,3 +1,7 @@
+// ════════════════════════════════════════════════════════════════
+//  ParameterForm.cs  –  공정 실행 검색 조건 및 센서 선택 화면
+//  만든이: 이선우
+// ════════════════════════════════════════════════════════════════
 using System;
 using System.Globalization;
 using System.IO;
@@ -14,6 +18,7 @@ namespace Iruza.src.Parameter
         Input = 1,
         Output = 2
     }
+    // 검색 조건을 저장하거나 PostgreSQL 실행 이력을 트리 노드로 조회합니다.
     public partial class ParameterForm : Form
     {
         private readonly string _parameterFilePath;
@@ -86,6 +91,7 @@ namespace Iruza.src.Parameter
             SetSensorType(SensorType.None);
         }
 
+        // 저장된 JSON 검색 조건을 읽고, 파일이 없으면 기본 기간을 적용합니다.
         private void LoadParameterSetting()
         {
             try
@@ -126,6 +132,7 @@ namespace Iruza.src.Parameter
             }
         }
 
+        // 입력 조건을 검증한 뒤 검색된 실행 이름을 호출자가 제공한 트리에 채웁니다.
         private void btnSearch_Click(object sender, EventArgs e)
         {
             if (!TryGetSearchCondition(out var condition, out var errorMessage))

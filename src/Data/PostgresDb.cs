@@ -1,3 +1,8 @@
+// ════════════════════════════════════════════════════════════════
+//  PostgresDb.cs  –  PostgreSQL 측정 데이터 접근 계층
+//  만든이: 이선우
+//  Process Run, Step, Smith Chart Point를 조회하여 화면용 모델로 변환
+// ════════════════════════════════════════════════════════════════
 using System;
 using System.Collections.Generic;
 using System.Configuration;
@@ -7,6 +12,7 @@ using NpgsqlTypes;
 
 namespace Iruza
 {
+    // process_run 테이블의 실행 이력 레코드입니다.
     internal class ProcessRunRecord
     {
         public long RunId { get; set; }
@@ -18,6 +24,7 @@ namespace Iruza
         public DateTime? CreatedAt { get; set; }
     }
 
+    // process_step 테이블의 공정 단계 및 센서 측정값 레코드입니다.
     internal class ProcessStepRecord
     {
         public long StepId { get; set; }
@@ -60,6 +67,7 @@ namespace Iruza
         public short? ProcStatus { get; set; }
     }
 
+    // smith_chart_point 테이블의 채널별 임피던스 계산 결과 레코드입니다.
     internal class SmithChartPointRecord
     {
         public long PointId { get; set; }
@@ -83,10 +91,12 @@ namespace Iruza
         public decimal? EfficiencyPct { get; set; }
     }
 
+    // PostgreSQL 조회 결과를 도메인 모델로 매핑하는 정적 데이터 접근 클래스입니다.
     internal static class MeasurementDb
     {
         private const string ConnectionStringName = "MeasurementDb";
 
+        // App.config의 MeasurementDb 연결 문자열을 사용해 새 연결을 생성합니다.
         public static NpgsqlConnection CreateConnection()
         {
             var connectionString = ConfigurationManager.ConnectionStrings[ConnectionStringName]?.ConnectionString;
@@ -97,6 +107,7 @@ namespace Iruza
             return new NpgsqlConnection(connectionString);
         }
 
+        // 기간 조건으로 공정 실행 이름 목록을 조회합니다.
         public static List<string> GetProcessRunNames(DateTime? startTime = null, DateTime? endTime = null)
         {
             var sql = @"
@@ -137,6 +148,7 @@ WHERE 1 = 1";
             return result;
         }
 
+        // 레시피, 단계, 전력 및 기간 조건을 조합해 공정 실행 이름 목록을 조회합니다.
         public static List<string> GetProcessRunNames(
             string recipeName = null,
             short? stepNum = null,
@@ -530,6 +542,7 @@ INNER JOIN smith_chart_point p ON p.step_id = s.step_id";
         }
 
      
+        // 지정 실행과 RF 채널의 모든 단계를 화면 표시용 측정 데이터셋으로 변환합니다.
         public static MeasurementDataset GetMeasurementDatasetByRunId(long runId, string channel, double z0 = 50.0)
         {
             const string sql = @"
@@ -701,7 +714,8 @@ WHERE r.run_id = @run_id
             return ds ?? new MeasurementDataset { Name = "EMPTY_" + channel, Z0 = z0 };
         }
 
-    public static MeasurementDataset GetMeasurementDatasetByRunId(
+        // 선택한 단계와 전달 전력 범위만 포함하여 측정 데이터셋을 구성합니다.
+        public static MeasurementDataset GetMeasurementDatasetByRunId(
     long runId, string channel, int? stepNum = null,
     double? minDeliveredP = null, double? maxDeliveredP = null,
     double z0 = 50.0)
@@ -805,6 +819,7 @@ WHERE r.run_id = @run_id
             return ds ?? new MeasurementDataset { Name = "EMPTY_" + channel, Z0 = z0 };
         }
 
+        // DataReader의 process_run 행을 ProcessRunRecord로 안전하게 매핑합니다.
         private static ProcessRunRecord MapProcessRun(NpgsqlDataReader reader)
         {
             return new ProcessRunRecord
@@ -819,6 +834,7 @@ WHERE r.run_id = @run_id
             };
         }
 
+        // DataReader의 process_step 행을 ProcessStepRecord로 안전하게 매핑합니다.
         private static ProcessStepRecord MapProcessStep(NpgsqlDataReader reader)
         {
             return new ProcessStepRecord

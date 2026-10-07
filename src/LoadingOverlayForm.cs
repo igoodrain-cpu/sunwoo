@@ -3,6 +3,7 @@
 //  메인 UI 스레드와 별도의 스레드/메시지 루프에서 실행되는 로딩 창.
 //  메인 폼이 차트 렌더링 등으로 오래 블로킹되어도 이 폼의 Marquee
 //  애니메이션은 자기 스레드의 메시지 펌프로 계속 돌아간다.
+//  만든이: 이선우
 // ════════════════════════════════════════════════════════════════
 using System;
 using System.Drawing;
@@ -11,6 +12,7 @@ using System.Windows.Forms;
 
 namespace Iruza
 {
+    // 작업 중 별도 UI 스레드에서 진행 상태를 표시하는 비모달 로딩 창입니다.
     public class LoadingOverlayForm : Form
     {
         private const float ScaleFactor = 1.5f;

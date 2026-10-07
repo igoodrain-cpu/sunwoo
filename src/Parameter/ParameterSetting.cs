@@ -1,3 +1,7 @@
+// ════════════════════════════════════════════════════════════════
+//  ParameterSetting.cs  –  검색 조건 JSON 저장 및 복원 모델
+//  만든이: 이선우
+// ════════════════════════════════════════════════════════════════
 using System;
 using System.Collections.Generic;
 using System.Globalization;
@@ -7,6 +11,7 @@ using System.Web.Script.Serialization;
 
 namespace Iruza.src.Parameter
 {
+    // 기간, 레시피, 단계, 전력 및 센서 검색 조건을 직렬화합니다.
     internal sealed class ParameterSetting
     {
         public DateTime? StartTime { get; set; }
@@ -17,6 +22,7 @@ namespace Iruza.src.Parameter
         public decimal? MaxPower { get; set; }
         public SensorType? Sensor { get; set; }
 
+        // JSON의 이전·현재 키 이름을 모두 인식하여 검색 조건을 읽습니다.
         public static ParameterSetting Load(string filePath)
         {
             if (!File.Exists(filePath))
@@ -46,6 +52,7 @@ namespace Iruza.src.Parameter
             };
         }
 
+        // 현재 검색 조건을 사람이 읽기 쉬운 JSON으로 저장합니다.
         public void Save(string filePath)
         {
             var serializer = new JavaScriptSerializer();

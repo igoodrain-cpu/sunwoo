@@ -6,6 +6,7 @@
 //  ※ 좌측 TreeView 네비게이션 (SplitContainer 제거 → 단순 Dock 방식 + 올바른 추가 순서로 재구성)
 //  ※ 로딩 오버레이: 별도 스레드(LoadingOverlayForm)에서 실행되어
 //     메인 스레드의 차트 렌더링 시간과 무관하게 Marquee 애니메이션이 끊기지 않음
+//  만든이: 이선우
 // ════════════════════════════════════════════════════════════════
 using System;
 using System.Collections.Generic;
@@ -23,6 +24,7 @@ using CheckBoxState = System.Windows.Forms.VisualStyles.CheckBoxState;
 
 namespace Iruza
 {
+    // 탐색 트리, 분석 탭 및 비동기 로딩 화면을 통합하는 응용 프로그램 기본 창입니다.
     public class MainShell : Form
     {
         private TabControl _tabs;
@@ -65,6 +67,10 @@ namespace Iruza
         private const int TVM_SETEXTENDEDSTYLE = 0x1100 + 44;
         private const int TVS_EX_DOUBLEBUFFER = 0x0004;
 
+
+        Label _biasLabel;
+        Label _sourceLabel;
+
         private sealed class LoadedRunData
         {
             public string Name { get; set; }
@@ -76,6 +82,7 @@ namespace Iruza
 
         private bool _isCheckPropagating = false; // 재귀 호출/이벤트 중복 방지 플래그
 
+        // 메인 메뉴와 탭·트리 컨트롤을 도킹 순서에 맞춰 초기화합니다.
         public MainShell()
         {
             Text = "RF Impedance Analyzer ";
@@ -84,6 +91,7 @@ namespace Iruza
             WindowState = FormWindowState.Maximized;   // 기동 시 모니터 전체 채움
             BackColor = Color.White;
             Font = new Font("Malgun Gothic", 9f);
+            ApplyAppIcon();   // 타이틀바·작업 표시줄 아이콘 (H&iruja)
 
 
             _tree = new TreeView
@@ -111,6 +119,44 @@ namespace Iruza
             //_tree.AfterCheck += tree_AfterCheck;
 
         }
+        // ── 응용 프로그램 아이콘 (H&iruja) ──
+        private const string AppIconFileName = "iruja.ico";
+
+        // 폼 아이콘을 H&iruja 아이콘으로 설정합니다.
+        // 1) 어셈블리에 포함된 리소스(빌드 작업: 포함 리소스)  2) 실행 파일 폴더의 iruja.ico
+        // 3) 실행 파일 자체 아이콘 순서로 찾으며, 모두 실패하면 기본 아이콘을 유지합니다.
+        private void ApplyAppIcon()
+        {
+            try
+            {
+                System.Drawing.Icon icon = LoadAppIcon();
+                if (icon != null) Icon = icon;
+            }
+            catch
+            {
+                // 아이콘 로드 실패는 프로그램 동작에 영향을 주지 않으므로 무시합니다.
+            }
+        }
+
+        /// <summary>다른 폼(ParameterForm 등)에서도 같은 아이콘을 쓸 수 있도록 공개합니다.</summary>
+        public static System.Drawing.Icon LoadAppIcon()
+        {
+            var asm = typeof(MainShell).Assembly;
+            foreach (string name in asm.GetManifestResourceNames())
+            {
+                if (!name.EndsWith(AppIconFileName, StringComparison.OrdinalIgnoreCase)) continue;
+                using (Stream s = asm.GetManifestResourceStream(name))
+                {
+                    if (s != null) return new System.Drawing.Icon(s);
+                }
+            }
+
+            string path = Path.Combine(Application.StartupPath, AppIconFileName);
+            if (File.Exists(path)) return new System.Drawing.Icon(path);
+
+            return System.Drawing.Icon.ExtractAssociatedIcon(Application.ExecutablePath);
+        }
+
 
         private void Tree_MouseDown(object sender, MouseEventArgs e)
         {
@@ -140,9 +186,6 @@ namespace Iruza
                 }
             }
         }
-
-
-
         private void Tree_DrawNode(object sender, DrawTreeNodeEventArgs e)
         {
             var tree = e.Node.TreeView;
@@ -318,9 +361,6 @@ namespace Iruza
                         });
                     }
 
-
-
-
                 }
                 else
                 {
@@ -354,6 +394,9 @@ namespace Iruza
 
                     if (sensorType == SensorType.None)
                     {
+                        //_sourceLabel.Text = "source(Input sensor)";
+                        //_biasLabel.Text = "bias(Input sensor)";
+
                         var processSteps = MeasurementDb.GetProcessStepsByRunId(processRun.RunId, _stepNum);
                         var sourceDataset = MeasurementDb.GetMeasurementDatasetByRunId(processRun.RunId, "source", _stepNum, _minPower, _maxPower, 50);
                         var biasDataset = MeasurementDb.GetMeasurementDatasetByRunId(processRun.RunId, "bias", _stepNum, _minPower, _maxPower, 50);
@@ -380,17 +423,23 @@ namespace Iruza
             switch (sensorType)
             {
                 case SensorType.Input:
-                    Text = "RF Impedance Analyzer - Input sensor";
+                    Text = "RF Impedance Analyzer";
                     // TODO: Input sensor 선택 시 처리
+                    _sourceLabel.Text = "source(Input sensor)";
+                    _biasLabel.Text = "bias(Input sensor)";
                     break;
 
                 case SensorType.Output:
-                    Text = "RF Impedance Analyzer - Output sensor";
+                    Text = "RF Impedance Analyzer";
                     // TODO: Output sensor 선택 시 처리
+                    _sourceLabel.Text = "source(Output sensor)";
+                    _biasLabel.Text = "bias(Output sensor)";
                     break;
 
                 default:
-                    Text = "RF Impedance Analyzer ";
+                    Text = "RF Impedance Analyzer ";    
+                    _sourceLabel.Text = "source(Input sensor)";
+                    _biasLabel.Text = "bias(Input sensor)";
                     break;
             }
         }
@@ -455,7 +504,7 @@ namespace Iruza
                 Panel2MinSize = 100
             };
 
-            var sourceLabel = new Label
+            _sourceLabel = new Label
             {
                 Text = "Source",
                 Dock = DockStyle.Top,
@@ -469,9 +518,9 @@ namespace Iruza
 
             var sourceContainer = new Panel { Dock = DockStyle.Fill };
             sourceContainer.Controls.Add(_sourcePanel);   // Fill → 먼저 추가
-            sourceContainer.Controls.Add(sourceLabel);   // Top  → 나중에 추가
+            sourceContainer.Controls.Add(_sourceLabel);   // Top  → 나중에 추가
 
-            var biasLabel = new Label
+            _biasLabel = new Label
             {
                 Text = "Bias",
                 Dock = DockStyle.Top,
@@ -485,7 +534,7 @@ namespace Iruza
 
             var biasContainer = new Panel { Dock = DockStyle.Fill };
             biasContainer.Controls.Add(_biasPanel);   // Fill → 먼저 추가
-            biasContainer.Controls.Add(biasLabel);   // Top  → 나중에 추가
+            biasContainer.Controls.Add(_biasLabel);   // Top  → 나중에 추가
 
 
             splitSourceBias.Panel1.Controls.Add(sourceContainer);

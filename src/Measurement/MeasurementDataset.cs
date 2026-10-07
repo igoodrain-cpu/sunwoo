@@ -1,5 +1,6 @@
 // ════════════════════════════════════════════════════════════════
 //  MeasurementDataset.cs  –  측정 데이터셋 (CSV 입출력 포함)
+//  만든이: 이선우
 // ════════════════════════════════════════════════════════════════
 using System;
 using System.Collections.Generic;
@@ -10,6 +11,7 @@ using System.Text;
 
 namespace Iruza
 {
+    // 하나의 RF 채널 측정 단계와 차트·통계·CSV 변환 기능을 관리합니다.
     public class MeasurementDataset
     {
         public string Name  { get; set; } = "측정 데이터";

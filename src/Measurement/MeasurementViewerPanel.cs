@@ -2,6 +2,7 @@
 //  MeasurementViewerPanel.cs  –  탭2: 측정 데이터 뷰어
 //  스미스차트(좌) + 15컬럼 DataGridView(우) + 통계 바
 //  [CHG] 여러 MeasurementDataset을 체크박스로 선택 → 스미스차트에 겹쳐 표시
+//  만든이: 이선우
 // ════════════════════════════════════════════════════════════════
 using System;
 using System.Collections.Generic;
@@ -14,6 +15,7 @@ using System.Windows.Forms;
 
 namespace Iruza
 {
+    // 여러 Source/Bias 데이터셋을 선택해 표와 스미스 차트에 함께 표시합니다.
     public class MeasurementViewerPanel : Panel
     {
         // 이 뷰어(예: Source 패널, Bias 패널)가 보유한 데이터셋 목록
@@ -61,6 +63,7 @@ namespace Iruza
         }
 
 
+        // 트리에서 선택한 데이터셋을 채널별 이름으로 등록하고 차트 겹쳐보기를 갱신합니다.
         public void OverlappedChartDisplay(int i, TreeNode root, string pName, MeasurementDataset pMeasurementDataset)
         {
             BackColor = Color.White;
@@ -148,6 +151,7 @@ namespace Iruza
         }
 
         // ── 공개 메서드 (MainShell 메뉴 / 트리노드 등에서 호출) ──
+        // CSV 파일을 읽어 활성 데이터셋과 차트 선택 목록에 추가합니다.
         public void ImportCsv()
         {
             using var dlg = new OpenFileDialog { Filter = "CSV 파일|*.csv|모든 파일|*.*" };
@@ -514,7 +518,7 @@ namespace Iruza
                 ("Z_Text","Z",true),("Z_Normalized","z norm",true),
                 ("ForwardP_W","Fwd W",true),("ReflectedP_W","Ref W",true),
                 ("DeliveredP_W","Del W",true),("ReturnLoss_dB","RL dB",true),
-                ("Efficiency_pct","η %",true),("Ar_Flow","Ar",true),
+                ("Efficiency_pct","η %",true),("Vdc","Vdc",true),("Ar_Flow","Ar",true),
                 ("O2_Flow","O2",true),("APC_Pressure","APC Pre",true),
                 ("APC_Position","APC Pos",true),("VVC1","VVC1",true),
                 ("VVC2","VVC2",true),("VVC3","VVC3",true),
