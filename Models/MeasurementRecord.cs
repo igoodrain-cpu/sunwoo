@@ -3,7 +3,9 @@ namespace MeasurementImporterService.Models;
 public enum RfChannel
 {
     Source,
-    Bias
+    Bias,
+    Source_Out,
+    Bias_Out    
 }
 
 /// <summary>
@@ -50,6 +52,7 @@ public sealed class ProcessStepRecord
     public decimal? BPresetTune { get; init; }
     public decimal? BLoadPos { get; init; }
     public decimal? BTunePos { get; init; }
+    public decimal? Vdc{ get; init; }
     public decimal? ArFlow { get; init; }
     public decimal? O2Flow { get; init; }
     public decimal? ApcPressure { get; init; }
@@ -60,6 +63,9 @@ public sealed class ProcessStepRecord
     public short ProcStatus { get; init; }
     public required SmithChartPointRecord SourcePoint { get; init; }
     public required SmithChartPointRecord BiasPoint { get; init; }
+
+    public required SmithChartPointRecord SourcePointOut { get; init; }
+    public required SmithChartPointRecord BiasPointOut { get; init; }
 }
 
 public sealed class SmithChartPointRecord

@@ -44,6 +44,7 @@ CREATE TABLE IF NOT EXISTS process_step (
     b_preset_tune        NUMERIC(6,2),
     b_load_pos           NUMERIC(6,2),
     b_tune_pos           NUMERIC(6,2),
+    vdc                  NUMERIC(8,2),
     ar_flow              NUMERIC(8,2),
     o2_flow              NUMERIC(8,2),
     apc_pressure         NUMERIC(8,2),

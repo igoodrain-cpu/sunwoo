@@ -11,7 +11,30 @@ namespace MeasurementImporterService.Services;
 /// </summary>
 public sealed class CsvParserService
 {
-    private const int ExpectedColumnCount = 34;
+    private const int ExpectedColumnCount = 43;
+
+    // 임피던스 사양 범위 (Zin/Zp 공통)
+    //   R(Resistance): 0 ~ 3000 Ω,  X(Reactance): -3000 ~ +3000 Ω
+    private const double RMin = 0.0;
+    private const double RMax = 3000.0;
+    private const double XMin = -3000.0;
+    private const double XMax = 3000.0;
+
+    // R >= 0 이면 |Γ| <= 1 이 수학적으로 보장된다. R = 0(순수 리액턴스, RF Off 시 R=X=0 포함)이면
+    // |Γ| = 1 이 정확한 값이므로 이는 이상치가 아니다. 1을 넘는 것은 부동소수점 오차뿐이므로
+    // 상한은 1.0으로 둔다. (gamma_mag NUMERIC(9,6)은 1.000000 저장 가능)
+    private const double GammaMagLimit = 1.0;
+
+    // |Γ|가 이 값 이상이면 VSWR이 사실상 무한대(완전 반사)이므로 VswrLimit으로 저장한다.
+    private const double GammaTotalReflection = 1.0 - 1e-6;
+    private const decimal VswrLimit = 999.999m;
+
+    // 상위 계측 시스템의 로깅 버그로 B채널 Vrms가 10^6배 부풀려져 들어오는 경우가 있다
+    // (예: 실제 17.79V가 17794063.61로 기록됨). process_step.b_vrms(NUMERIC(10,3), 정수부
+    // 최대 7자리)와 smith_chart_point.vout_vrms(NUMERIC(10,4), 정수부 최대 6자리) 양쪽에서
+    // numeric overflow(22003)를 일으키므로, 파싱 시점에 스케일을 정규화한다.
+    private const decimal VrmsAnomalyThreshold = 1_000_000m;
+    private const decimal VrmsScaleFactor = 1_000_000m;
 
     public async Task<string> ComputeFileHashAsync(string filePath, CancellationToken cancellationToken)
     {
@@ -97,7 +120,7 @@ public sealed class CsvParserService
             SourceFile = Path.GetFileName(filePath),
             FileHash = fileHash,
             RunName = runName,
-            RecipeName = NullIfEmpty(defaultRecipeName),
+            RecipeName = baseName,
             EquipmentId = NullIfEmpty(defaultEquipmentId),
             StartedAt = startedAt,
             EndedAt = endedAt,
@@ -130,8 +153,38 @@ public sealed class CsvParserService
     {
         var logDate = ParseDate(c[0]);
         var logTime = ParseTime(c[1]);
-        var sourcePoint = ParseSmithChartPointS(c, RfChannel.Source);
-        var biasPoint = ParseSmithChartPointB(c, RfChannel.Bias);
+
+        // 상위 시스템의 스케일 버그(10^6배 부풀려짐)를 여기서 한 번만 보정하고,
+        // process_step과 smith_chart_point 양쪽에서 같은 보정값을 재사용한다.
+        var sVrmsCorrected = CorrectVrmsScale(ParseDecimalOrNull(c[7]), "S.Mat.Vrms");
+        var bVrmsCorrected = CorrectVrmsScale(ParseDecimalOrNull(c[18]), "B.Mat.Vrms");
+
+         // 임피던스 컬럼 (사양 순서)
+        //   c[34] S_Zin_R, c[35] S_Zin_X, c[36] B_Zin_R, c[37] B_Zin_X
+        //   c[38] S_Zp_R,  c[39] S_Zp_X,  c[40] B_Zp_R,  c[41] B_Zp_X
+            var sourcePoint = BuildSmithChartPoint(
+            c, RfChannel.Source,
+            voutVrms: sVrmsCorrected, ioutIdx: 8, phaseIdx: 9,
+            rIdx: 34, xIdx: 35,
+            forwardIdx: 5, reflectedIdx: 6, deliveredIdx: 10);
+
+        var biasPoint = BuildSmithChartPoint(
+            c, RfChannel.Bias,
+            voutVrms: bVrmsCorrected, ioutIdx: 19, phaseIdx: 20,
+            rIdx: 38, xIdx: 39,
+            forwardIdx: 16, reflectedIdx: 17, deliveredIdx: 21);
+
+        var sourcePoint_out = BuildSmithChartPoint(
+            c, RfChannel.Source_Out,
+            voutVrms: sVrmsCorrected, ioutIdx: 8, phaseIdx: 9,
+            rIdx: 36, xIdx: 37,
+            forwardIdx: 5, reflectedIdx: 6, deliveredIdx: 10);
+
+        var biasPoint_out = BuildSmithChartPoint(
+            c, RfChannel.Bias_Out,
+            voutVrms: bVrmsCorrected, ioutIdx: 19, phaseIdx: 20,
+            rIdx: 40, xIdx: 41,
+            forwardIdx: 16, reflectedIdx: 17, deliveredIdx: 21);
 
         return new ProcessStepRecord
         {
@@ -142,7 +195,7 @@ public sealed class CsvParserService
             SrfFreq = ParseDecimalOrNull(c[4]),
             SFwd = ParseDecimalOrNull(c[5]),
             SRef = ParseDecimalOrNull(c[6]),
-            SVrms = ParseDecimalOrNull(c[7]),
+            SVrms = sVrmsCorrected,
             SIrms = ParseDecimalOrNull(c[8]),
             SPhase = ParseDecimalOrNull(c[9]),
             SDeliveredPwr = ParseDecimalOrNull(c[10]),
@@ -153,7 +206,7 @@ public sealed class CsvParserService
             BrFreq = ParseDecimalOrNull(c[15]),
             BFwd = ParseDecimalOrNull(c[16]),
             BRef = ParseDecimalOrNull(c[17]),
-            BVrms = ParseDecimalOrNull(c[18]),
+            BVrms = bVrmsCorrected,
             BIrms = ParseDecimalOrNull(c[19]),
             BPhase = ParseDecimalOrNull(c[20]),
             BDeliveredPwr = ParseDecimalOrNull(c[21]),
@@ -161,34 +214,66 @@ public sealed class CsvParserService
             BPresetTune = ParseDecimalOrNull(c[23]),
             BLoadPos = ParseDecimalOrNull(c[24]),
             BTunePos = ParseDecimalOrNull(c[25]),
-            ArFlow = ParseDecimalOrNull(c[26]),
-            O2Flow = ParseDecimalOrNull(c[27]),
-            ApcPressure = ParseDecimalOrNull(c[28]),
-            ApcPosition = ParseDecimalOrNull(c[29]),
-            Vvc1 = ParseDecimalOrNull(c[30]),
-            Vvc2 = ParseDecimalOrNull(c[31]),
-            Vvc3 = ParseDecimalOrNull(c[32]),
-            ProcStatus = short.Parse(c[33], CultureInfo.InvariantCulture),
+            Vdc = ParseDecimalOrNull(c[26]),    
+            ArFlow = ParseDecimalOrNull(c[27]),
+            O2Flow = ParseDecimalOrNull(c[28]),
+            ApcPressure = ParseDecimalOrNull(c[29]),
+            ApcPosition = ParseDecimalOrNull(c[30]),
+            Vvc1 = ParseDecimalOrNull(c[31]),
+            Vvc2 = ParseDecimalOrNull(c[32]),
+            Vvc3 = ParseDecimalOrNull(c[33]),
+            ProcStatus = short.Parse(c[42], CultureInfo.InvariantCulture),
             SourcePoint = sourcePoint,
-            BiasPoint = biasPoint
+            BiasPoint = biasPoint,
+            SourcePointOut = sourcePoint_out,
+            BiasPointOut = biasPoint_out    
         };
     }
 
-    private static SmithChartPointRecord ParseSmithChartPointS(IReadOnlyList<string> c, RfChannel channel)
+    /// <summary>
+    /// Source/Bias 공통 Smith chart point 계산. R/X는 CSV 원본값을 그대로 사용하고,
+    /// 여기서 계산되는 감마(Γ)와 VSWR은 DB numeric 컬럼 한계를 넘지 않도록 클램프한다.
+    /// </summary>
+    private static SmithChartPointRecord BuildSmithChartPoint(
+        IReadOnlyList<string> c,
+        RfChannel channel,
+        decimal? voutVrms, int ioutIdx, int phaseIdx,
+        int rIdx, int xIdx,
+        int forwardIdx, int reflectedIdx, int deliveredIdx)
     {
+        var forwardPower = ParseDecimalOrNull(c[forwardIdx]);
+        var reflectedPower = ParseDecimalOrNull(c[reflectedIdx]);
+        var deliveredPower = ParseDecimalOrNull(c[deliveredIdx]);
 
-        //var gammaMag = ParseDecimalOrNull(c[startIndex + 7]);
-        var forwardPower = ParseDecimalOrNull(c[5]);
-        var reflectedPower = ParseDecimalOrNull(c[6]);
-        var deliveredPower = ParseDecimalOrNull(c[10]);
+        const double z0 = 50.0;
 
-        double z0 = 50.0;
-        double r = CalcR(vrms: Convert.ToDouble(ParseDecimalOrNull(c[7]) ?? 0m),irms: Convert.ToDouble(ParseDecimalOrNull(c[8]) ?? 0m),phaseDeg: Convert.ToDouble(ParseDecimalOrNull(c[9]) ?? 0m));
-        double x = CalcX(vrms: Convert.ToDouble(ParseDecimalOrNull(c[7]) ?? 0m), irms: Convert.ToDouble(ParseDecimalOrNull(c[8]) ?? 0m), phaseDeg: Convert.ToDouble(ParseDecimalOrNull(c[9]) ?? 0m));
+        // 1) 사양 범위 검증: 범위를 벗어난 원본값(예: R = -0.01 같은 계측 노이즈)만 경고 후 클램프.
+        //    R < 0 이 들어오면 |Γ| > 1 이 되므로, 감마 계산 전에 여기서 막는다.
+        double r = ClampToSpec(ParseRequiredDouble(c[rIdx], channel, "R"), RMin, RMax, channel, "R");
+        double x = ClampToSpec(ParseRequiredDouble(c[xIdx], channel, "X"), XMin, XMax, channel, "X");
+
+        //double r = ParseRequiredDouble(c[rIdx], channel, "R");
+        //double x = ParseRequiredDouble(c[xIdx], channel, "X");
+
+        // 2) 반사계수 계산
         double gammaReal = CalcGammaReal(r, x, z0);
         double gammaImag = CalcGammaImag(r, x, z0);
         double gammaMag = CalcGammaMag(gammaReal, gammaImag);
-        double vswr = CalcVSWR(gammaMag);
+
+        // 3) R >= 0 이 보장된 상태에서 |Γ| > 1 은 부동소수점 오차(1e-16 수준)뿐이므로 경고 없이 보정
+        if (gammaMag > GammaMagLimit)
+        {
+            double scale = GammaMagLimit / gammaMag;
+            gammaReal *= scale;
+            gammaImag *= scale;
+            gammaMag = GammaMagLimit;
+        }
+
+        // 4) VSWR: |Γ| ≈ 1(R ≈ 0, 순수 리액턴스 또는 RF Off)은 완전 반사 → 무한대이므로 상한값으로 저장.
+        //    사양 범위 내 정상 데이터이므로 경고를 남기지 않는다.
+        decimal vswr = gammaMag >= GammaTotalReflection
+            ? VswrLimit
+            : Math.Min(Convert.ToDecimal(CalcVSWR(gammaMag)), VswrLimit);
 
         string zText = CalcZText(r, x);
         string zNormalized = CalcZNormalized(r, x, z0);
@@ -196,26 +281,16 @@ public sealed class CsvParserService
         return new SmithChartPointRecord
         {
             Channel = channel,
-            VoutVrms = ParseDecimalOrNull(c[7]),
-            IoutArms = ParseDecimalOrNull(c[8]),
-            PhaseDeg = ParseDecimalOrNull(c[9]),
-
-           // ROhm = ParseDecimalOrNull(c[startIndex + 3]),
-           // XOhm = ParseDecimalOrNull(c[startIndex + 4]),
-           // GammaReal = ParseDecimalOrNull(c[startIndex + 5]),
-           // GammaImag = ParseDecimalOrNull(c[startIndex + 6]),
-           // GammaMag = gammaMag,
-           // Vswr = ParseDecimalOrNull(c[startIndex + 8]),
+            VoutVrms = voutVrms,
+            IoutArms = ParseDecimalOrNull(c[ioutIdx]),
+            PhaseDeg = ParseDecimalOrNull(c[phaseIdx]),
 
             ROhm = Convert.ToDecimal(r),
             XOhm = Convert.ToDecimal(x),
             GammaReal = Convert.ToDecimal(gammaReal),
             GammaImag = Convert.ToDecimal(gammaImag),
             GammaMag = Convert.ToDecimal(gammaMag),
-            Vswr = Convert.ToDecimal(vswr),
-
-            //ZText = TrimToLength(NullIfEmpty(c[startIndex + 9]), 40),
-            //ZNormalized = TrimToLength(NullIfEmpty(c[startIndex + 10]), 40),
+            Vswr = vswr,
 
             ZText = zText,
             ZNormalized = zNormalized,
@@ -228,64 +303,61 @@ public sealed class CsvParserService
         };
     }
 
-    private static SmithChartPointRecord ParseSmithChartPointB(IReadOnlyList<string> c, RfChannel channel)
+    /// <summary>
+    /// 상위 계측 시스템의 로깅 버그로 Vrms가 10^6배 부풀려져 들어오는 경우를 감지해 보정한다.
+    /// 정상적인 RF 매칭 네트워크 Vrms는 이 임계값보다 훨씬 작으므로, 이 범위를 넘으면
+    /// 스케일 오류로 간주해 10^6으로 나눈다. 그렇지 않으면 process_step.b_vrms
+    /// (NUMERIC(10,3)) / smith_chart_point.vout_vrms(NUMERIC(10,4))에서 numeric overflow가 난다.
+    /// </summary>
+    private static decimal? CorrectVrmsScale(decimal? raw, string fieldName)
     {
-        //var gammaMag = ParseDecimalOrNull(c[startIndex + 7]);
-        //var forwardPower = ParseDecimalOrNull(c[startIndex + 11]);
-        //var reflectedPower = ParseDecimalOrNull(c[startIndex + 12]);
-        //var deliveredPower = ParseDecimalOrNull(c[startIndex + 13]);
-        var forwardPower = ParseDecimalOrNull(c[16]);
-        var reflectedPower = ParseDecimalOrNull(c[17]);
-        var deliveredPower = ParseDecimalOrNull(c[21]);
-
-
-        double z0 = 50.0;
-        double r = CalcR(vrms: Convert.ToDouble(ParseDecimalOrNull(c[18]) ?? 0m), irms: Convert.ToDouble(ParseDecimalOrNull(c[19]) ?? 0m), phaseDeg: Convert.ToDouble(ParseDecimalOrNull(c[20]) ?? 0m));
-        double x = CalcX(vrms: Convert.ToDouble(ParseDecimalOrNull(c[18]) ?? 0m), irms: Convert.ToDouble(ParseDecimalOrNull(c[19]) ?? 0m), phaseDeg: Convert.ToDouble(ParseDecimalOrNull(c[20]) ?? 0m));
-        double gammaReal = CalcGammaReal(r, x, z0);
-        double gammaImag = CalcGammaImag(r, x, z0);
-        double gammaMag = CalcGammaMag(gammaReal, gammaImag);
-        double vswr = CalcVSWR(gammaMag);
-
-        string zText = CalcZText(r, x);
-        string zNormalized = CalcZNormalized(r, x, z0);
-
-        return new SmithChartPointRecord
+        if (!raw.HasValue)
         {
-            Channel = channel,
-            //VoutVrms = ParseDecimalOrNull(c[startIndex]),
-            //IoutArms = ParseDecimalOrNull(c[startIndex + 1]),
-            //PhaseDeg = ParseDecimalOrNull(c[startIndex + 2]),
-            VoutVrms = ParseDecimalOrNull(c[18]),
-            IoutArms = ParseDecimalOrNull(c[19]),
-            PhaseDeg = ParseDecimalOrNull(c[20]),
+            return raw;
+        }
 
-            //ROhm = ParseDecimalOrNull(c[startIndex + 3]),
-            //XOhm = ParseDecimalOrNull(c[startIndex + 4]),
-            //GammaReal = ParseDecimalOrNull(c[startIndex + 5]),
-            // GammaImag = ParseDecimalOrNull(c[startIndex + 6]),
-            //GammaMag = Convert.ToDecimal(gammaMag),
-            //Vswr = ParseDecimalOrNull(c[startIndex + 8]),
+        var abs = Math.Abs(raw.Value);
+        if (abs < VrmsAnomalyThreshold)
+        {
+            return raw;
+        }
 
-            ROhm = Convert.ToDecimal(r),
-            XOhm = Convert.ToDecimal(x),
-            GammaReal = Convert.ToDecimal(gammaReal),
-            GammaImag = Convert.ToDecimal(gammaImag),
-            GammaMag = Convert.ToDecimal(gammaMag),
-            Vswr = Convert.ToDecimal(vswr),
+        var corrected = raw.Value / VrmsScaleFactor;
+        Console.Error.WriteLine(
+            $"[CsvParserService] 경고: {fieldName} 값({raw.Value:G10})이 비정상적으로 커서 " +
+            $"10^6 스케일 오류로 간주하고 {corrected:G10}(으)로 보정했습니다. 원본 계측 시스템의 " +
+            $"단위/스케일 버그일 가능성이 있으니 상위 시스템 쪽도 확인이 필요합니다.");
 
-           // ZText = TrimToLength(NullIfEmpty(c[startIndex + 9]), 40),
-           // ZNormalized = TrimToLength(NullIfEmpty(c[startIndex + 10]), 40),
+        return corrected;
+    }
 
-            ZText = zText,
-            ZNormalized = zNormalized,
+    /// <summary>
+    /// 임피던스 원본값을 사양 범위로 제한한다. 범위를 벗어난 경우에만 경고를 남긴다.
+    /// 프로젝트에 ILogger가 주입 가능하면 Console.Error 대신 그쪽으로 교체 권장.
+    /// </summary>
+    private static double ClampToSpec(double value, double min, double max, RfChannel channel, string field)
+    {
+        if (value >= min && value <= max)
+        {
+            return value;
+        }
 
-            ForwardPowerW = forwardPower,
-            ReflectedPowerW = reflectedPower,
-            DeliveredPowerW = deliveredPower,
-            ReturnLossDb = ComputeReturnLossDb(Convert.ToDecimal(gammaMag), forwardPower, reflectedPower),
-            EfficiencyPct = ComputeEfficiencyPct(forwardPower, deliveredPower)
-        };
+        double clamped = Math.Clamp(value, min, max);
+        Console.Error.WriteLine(
+            $"[CsvParserService] 경고: {channel} 채널 {field}={value:G6} 이(가) 사양 범위({min:G6} ~ {max:G6})를 " +
+            $"벗어나 {clamped:G6}(으)로 보정했습니다.");
+        return clamped;
+    }
+
+    private static double ParseRequiredDouble(string value, RfChannel channel, string field)
+    {
+        if (double.TryParse(value?.Trim(), NumberStyles.Float, CultureInfo.InvariantCulture, out var result)
+            && double.IsFinite(result))
+        {
+            return result;
+        }
+
+        throw new FormatException($"{channel} 채널 {field} 값이 숫자가 아닙니다: '{value}'");
     }
 
     private static decimal? ComputeReturnLossDb(decimal? gammaMag, decimal? forwardPower, decimal? reflectedPower)
@@ -297,9 +369,15 @@ public sealed class CsvParserService
             ratio = (decimal)Math.Sqrt((double)(reflectedPower.Value / forwardPower.Value));
         }
 
-        if (!ratio.HasValue || ratio.Value <= 0 || ratio.Value >= 1)
+        if (!ratio.HasValue || ratio.Value <= 0)
         {
+            // |Γ| = 0 (완전 정합) → Return Loss 무한대이므로 null
             return null;
+        }
+        if (ratio.Value >= 1)
+        {
+            // |Γ| = 1 (완전 반사) → Return Loss = 0 dB
+            return 0m;
         }
 
         return decimal.Round((decimal)(-20d * Math.Log10((double)ratio.Value)), 2);
