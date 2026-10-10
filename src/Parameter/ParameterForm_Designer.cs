@@ -189,7 +189,19 @@
             "5",
             "6",
             "7",
-            "8"});
+            "8",
+            "9",
+            "10",
+            "11",
+            "12",
+            "13",
+            "14",
+            "15",
+            "16",
+            "17",
+            "18",
+            "19",
+            "20"});
             this.cboStep.Location = new System.Drawing.Point(108, 55);
             this.cboStep.Name = "cboStep";
             this.cboStep.Size = new System.Drawing.Size(90, 20);
