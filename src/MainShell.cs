@@ -6,6 +6,7 @@
 //  ※ 좌측 TreeView 네비게이션 (SplitContainer 제거 → 단순 Dock 방식 + 올바른 추가 순서로 재구성)
 //  ※ 로딩 오버레이: 별도 스레드(LoadingOverlayForm)에서 실행되어
 //     메인 스레드의 차트 렌더링 시간과 무관하게 Marquee 애니메이션이 끊기지 않음
+//  ※ 루트 노드 옆에 하위 노드 개수 표시 (체크 시 "체크 수/전체 수")
 //  만든이: 이선우
 // ════════════════════════════════════════════════════════════════
 using System;
@@ -38,6 +39,9 @@ namespace Iruza
         private readonly object _loadingLock = new object();
 
         private TreeNode _root;
+
+        // 데이터가 없을 때 루트 아래에 넣는 placeholder 노드 텍스트
+        private const string NoDataText = "데이터 없음";
 
         MeasurementViewerPanel _sourcePanel;
         MeasurementViewerPanel _biasPanel;
@@ -156,6 +160,28 @@ namespace Iruza
 
             return System.Drawing.Icon.ExtractAssociatedIcon(Application.ExecutablePath);
         }
+        // ── 루트 하위 노드 개수 ──────────────────────────────────────
+        /// <summary>"데이터 없음" placeholder를 제외한 실제 run 노드 수</summary>
+        private int GetRunNodeCount()
+        {
+            if (_root == null) return 0;
+
+            int count = 0;
+            foreach (TreeNode n in _root.Nodes)
+                if (n.Text != NoDataText) count++;
+            return count;
+        }
+
+        /// <summary>체크된 run 노드 수 ("데이터 없음" 제외)</summary>
+        private int GetCheckedRunNodeCount()
+        {
+            if (_root == null) return 0;
+
+            int count = 0;
+            foreach (TreeNode n in _root.Nodes)
+                if (n.Checked && n.Text != NoDataText) count++;
+            return count;
+        }
 
 
         private void Tree_MouseDown(object sender, MouseEventArgs e)
@@ -181,7 +207,7 @@ namespace Iruza
                         SetChildrenChecked(node, node.Checked);
                     }
 
-                    // 전체 트리를 다시 그려서 하위 노드들 체크박스까지 화면에 반영
+                    // 전체 트리를 다시 그려서 하위 노드들  체크박스 + 루트 개수 표시까지 화면에 반영
                     _tree.Invalidate();
                 }
             }
@@ -214,14 +240,28 @@ namespace Iruza
 
             // 3. 텍스트
             Color textColor = isSelected ? Color.Black : (e.Node.ForeColor == Color.Empty ? Color.Black : e.Node.ForeColor);
+            Font font = e.Node.NodeFont ?? tree.Font;
+            const TextFormatFlags flags = TextFormatFlags.VerticalCenter | TextFormatFlags.NoPrefix;
 
-            TextRenderer.DrawText(
-                e.Graphics,
-                e.Node.Text,
-                e.Node.NodeFont ?? tree.Font,
-                labelBounds,
-                textColor,
-                TextFormatFlags.VerticalCenter);
+            TextRenderer.DrawText(e.Graphics, e.Node.Text, font, labelBounds, textColor, flags);
+
+            // 4. 루트 노드에만 하위 노드 개수 표시  예) (35)  /  체크 시 (3/35)
+            if (e.Node == _root)
+            {
+                int total = GetRunNodeCount();
+                int checkedCnt = GetCheckedRunNodeCount();
+                string countText = checkedCnt > 0 ? $"({checkedCnt}/{total})" : $"({total})";
+
+                // Node.Bounds는 원래 Text 폭 기준이므로, 라벨 텍스트 바로 뒤부터 행 끝까지 영역을 잡아 그림
+                Size textSize = TextRenderer.MeasureText(e.Graphics, e.Node.Text, font, Size.Empty, flags);
+                int countX = labelBounds.Left + textSize.Width;
+                var countBounds = new Rectangle(countX, labelBounds.Top,
+                                                Math.Max(0, tree.ClientSize.Width - countX), labelBounds.Height);
+
+                TextRenderer.DrawText(e.Graphics, countText, font, countBounds,
+                                      Color.FromArgb(0, 102, 204), flags | TextFormatFlags.EndEllipsis);
+            }
+
 
             e.DrawDefault = false;
         }
@@ -464,6 +504,9 @@ namespace Iruza
                     _sensorType = _ParaDlg.SelectedSensor;
                     OnSensorTypeChanged(_sensorType);
                 }
+
+                // ParameterForm에서 루트 하위 노드가 다시 채워졌을 수 있으므로 개수 표시 갱신
+                _tree.Invalidate();
             });
 
 
@@ -566,7 +609,7 @@ namespace Iruza
         void BuildTree()
         {
 
-            _root = new TreeNode("Smith Chart Fingerprint");
+            _root = new TreeNode("Smith Chart");
 
             // PostgreSQL의 process_run 데이터를 트리 노드로 로드
             try
@@ -612,8 +655,7 @@ namespace Iruza
             }
 
             if (_root.Nodes.Count == 0)
-                _root.Nodes.Add(new TreeNode("데이터 없음"));
-
+                _root.Nodes.Add(new TreeNode(NoDataText));   // 개수 표시에서는 제외되어 (0)으로 표시
             _tree.Nodes.Add(_root);
             _root.Expand();
             _tree.SelectedNode = _root.Nodes[0];
@@ -658,7 +700,8 @@ namespace Iruza
 
                 foreach (TreeNode node in _root.Nodes)
                 {
-                    if (node.Checked)
+                    // "데이터 없음" placeholder는 DB 조회 대상에서 제외
+                    if (node.Checked && node.Text != NoDataText)
                         checkedRunNames.Add(node.Text);
 
                 }
@@ -732,7 +775,7 @@ namespace Iruza
                 }
                 else
                 {
-                    _tree.Invalidate(e.Node.Bounds);   // ← 개별 노드만 다시 그리기
+                    _tree.Invalidate();          // ← 루트의 체크 개수 표시도 갱신해야 하므로 전체 
                 }
             }
             finally
