@@ -2,6 +2,12 @@
 //  MeasurementViewerPanel.cs  –  탭2: 측정 데이터 뷰어
 //  스미스차트(좌) + 15컬럼 DataGridView(우) + 통계 바
 //  [CHG] 여러 MeasurementDataset을 체크박스로 선택 → 스미스차트에 겹쳐 표시
+//  [ZOOM] 스미스차트 확대/축소/이동 기능 추가
+//         - 툴바: 확대(+) / 축소(−) / 100% 버튼 + 현재 배율 표시
+//         - 마우스 휠: 커서 위치 기준 확대/축소
+//         - 왼쪽 버튼 드래그: 화면 이동(Pan)
+//         - 더블클릭 또는 키보드 0: 원래 크기로 복귀
+//         - 키보드 + / - : 확대/축소
 //  만든이: 이선우
 // ════════════════════════════════════════════════════════════════
 using System;
@@ -37,6 +43,7 @@ namespace Iruza
         private ComboBox _cbColor;
         private CheckBox _chkOverlay;          // [ADD] 겹쳐보기 단일 체크박스
         private FlowLayoutPanel _dsCheckPanel;   // [ADD] 데이터셋 체크박스(겹쳐보기 선택) 목록
+        private ToolStripLabel _lblZoom;         // [ZOOM] 현재 배율 표시
         private int _activeIdx = -1;
         private bool _isUpdatingSelection = false;
 
@@ -188,6 +195,10 @@ namespace Iruza
             _chart.SaveToPng(dlg.FileName, 1200, 1200);
             MessageBox.Show("차트 저장 완료.", "저장", MessageBoxButtons.OK, MessageBoxIcon.Information);
         }
+        // [ZOOM] 외부(MainShell 메뉴 등)에서도 호출할 수 있도록 공개
+        public void ZoomIn() => _chart?.ZoomIn();
+        public void ZoomOut() => _chart?.ZoomOut();
+        public void ResetZoom() => _chart?.ResetZoom();
 
         // [ADD] 트리노드 등 외부에서 특정 데이터셋을 이 뷰어에 추가하고 싶을 때 호출
         public void AddDataset(MeasurementDataset ds, bool select = true)
@@ -426,6 +437,11 @@ namespace Iruza
                     HighlightRow(stepIdx);
                 }
             };
+            // [ZOOM] 배율이 바뀌면 툴바 라벨 갱신 (휠/드래그/버튼 모두 이 이벤트로 통일)
+            _chart.ZoomChanged += z =>
+            {
+                if (_lblZoom != null) _lblZoom.Text = $"{z * 100:F0}%";
+            };
             split.Panel1.Controls.Add(_chart);
 
             var rightLayout = new TableLayoutPanel
@@ -469,9 +485,10 @@ namespace Iruza
         {
             var tb = new ToolStrip { Dock = DockStyle.Top };
 
-            void Btn(string txt, Action act)
+            void Btn(string txt, Action act, string tip = null)
             {
                 var b = new ToolStripButton(txt) { DisplayStyle = ToolStripItemDisplayStyle.Text };
+                if (tip != null) b.ToolTipText = tip;
                 b.Click += (s, e) => act();
                 tb.Items.Add(b);
             }
@@ -480,6 +497,14 @@ namespace Iruza
 
             tb.Items.Add(new ToolStripSeparator());
             Btn("차트 저장 PNG", SaveChartPng);
+            tb.Items.Add(new ToolStripSeparator());
+
+            // [ZOOM] 확대/축소 버튼 (_chart는 BuildLayout에서 생성되지만, 클릭 시점에 참조하므로 문제 없음)
+            Btn("확대 (+)", () => _chart?.ZoomIn(), "스미스차트 확대 (마우스 휠 위 / + 키)");
+            Btn("축소 (−)", () => _chart?.ZoomOut(), "스미스차트 축소 (마우스 휠 아래 / - 키)");
+            Btn("100%", () => _chart?.ResetZoom(), "원래 크기로 (더블클릭 / 0 키)");
+            _lblZoom = new ToolStripLabel("100%") { ForeColor = Color.DimGray, ToolTipText = "현재 배율 · 드래그로 이동" };
+            tb.Items.Add(_lblZoom);
             tb.Items.Add(new ToolStripSeparator());
 
             tb.Items.Add(new ToolStripLabel("  색상: "));
@@ -649,6 +674,7 @@ namespace Iruza
 
     // ── 차트 드로잉 패널 (측정 데이터용) ──
     // [CHG] 단일 MeasurementDataset → 여러 개를 겹쳐서(overlay) 그릴 수 있도록 변경
+    // [ZOOM] 확대/축소(배율) + 이동(Pan) 지원
     public class MeasurementChartPanel : Control
     {
         // [ADD] 데이터셋별 구분 색상 팔레트 (뷰어 패널의 체크박스 글자색과도 공용으로 사용)
@@ -682,11 +708,28 @@ namespace Iruza
         private int _hlStepIdx = -1;
         public event Action<int, int> StepHovered;   // (dsIndex, stepIndex), 해제 시 (-1,-1)
 
+        // ── [ZOOM] 확대/축소 상태 ──
+        private const float ZoomMin = 0.5f;    // 최소 50%
+        private const float ZoomMax = 20f;     // 최대 2000%
+        private const float ZoomStep = 1.25f;  // 버튼/휠 1회당 배율
+        private float _zoom = 1f;              // 현재 배율 (1 = 원래 크기)
+        private PointF _pan = PointF.Empty;    // 차트 중심의 이동량(px)
+        private bool _panning = false;
+        private bool _panMoved = false;
+        private Point _panStartMouse;
+        private PointF _panStartOffset;
+
+        public event Action<float> ZoomChanged;   // 배율 변경 시 (새 배율)
+        public float Zoom => _zoom;
+
+
         public MeasurementChartPanel()
         {
             DoubleBuffered = true; ResizeRedraw = true;
             SetStyle(ControlStyles.OptimizedDoubleBuffer |
-                     ControlStyles.AllPaintingInWmPaint | ControlStyles.UserPaint, true);
+                     ControlStyles.AllPaintingInWmPaint | ControlStyles.UserPaint |
+                     ControlStyles.Selectable, true);   // [ZOOM] 휠/키 입력을 받기 위해 포커스 가능하게
+            TabStop = true;
         }
 
         // [CHG] (데이터셋 인덱스, 데이터셋) 목록을 받아 모두 겹쳐서 표시
@@ -710,6 +753,69 @@ namespace Iruza
         {
             _hlDsIdx = dsIndex; _hlStepIdx = stepIndex; Invalidate();
         }
+        // ════════════════ [ZOOM] 확대/축소 API ════════════════
+
+        // 배율 1일 때의 기준 중심/반지름
+        void GetBaseGeometry(out float bcx, out float bcy, out float baseRad)
+        {
+            bcx = Width / 2f; bcy = Height / 2f;
+            baseRad = Math.Max(10f, Math.Min(bcx, bcy) - 36);
+        }
+
+        // 현재 배율/이동량이 반영된 실제 중심/반지름 (OnPaint, OnMouseMove 공용)
+        void GetGeometry(out float cx, out float cy, out float rad)
+        {
+            GetBaseGeometry(out float bcx, out float bcy, out float baseRad);
+            rad = baseRad * _zoom;
+            cx = bcx + _pan.X;
+            cy = bcy + _pan.Y;
+        }
+
+        // 화면 중앙 기준 확대
+        public void ZoomIn() => ZoomAt(_zoom * ZoomStep, new PointF(Width / 2f, Height / 2f));
+
+        // 화면 중앙 기준 축소
+        public void ZoomOut() => ZoomAt(_zoom / ZoomStep, new PointF(Width / 2f, Height / 2f));
+
+        // 원래 크기·위치로 복귀
+        public void ResetZoom()
+        {
+            _zoom = 1f;
+            _pan = PointF.Empty;
+            ZoomChanged?.Invoke(_zoom);
+            Invalidate();
+        }
+
+        /// <summary>
+        /// anchor(화면 좌표) 아래의 Γ 지점이 그대로 유지되도록 하면서 배율을 newZoom으로 변경
+        /// </summary>
+        public void ZoomAt(float newZoom, PointF anchor)
+        {
+            newZoom = Math.Max(ZoomMin, Math.Min(ZoomMax, newZoom));
+            if (Math.Abs(newZoom - _zoom) < 1e-4f) return;
+
+            GetGeometry(out float cx, out float cy, out float rad);
+            GetBaseGeometry(out float bcx, out float bcy, out float baseRad);
+
+            // anchor 위치의 정규화 좌표(Γ 평면 기준)
+            double ux = (anchor.X - cx) / rad;
+            double uy = (anchor.Y - cy) / rad;
+
+            float newRad = baseRad * newZoom;
+            float ncx = anchor.X - (float)(ux * newRad);
+            float ncy = anchor.Y - (float)(uy * newRad);
+
+            _zoom = newZoom;
+            _pan = new PointF(ncx - bcx, ncy - bcy);
+
+            // 정확히 1배로 돌아오면 위치도 원점으로 정리
+            if (Math.Abs(_zoom - 1f) < 1e-3f) { _zoom = 1f; _pan = PointF.Empty; }
+
+            ZoomChanged?.Invoke(_zoom);
+            Invalidate();
+        }
+
+        // ════════════════════════════════════════════════════
 
         PointF Sp(double re, double im, float cx, float cy, float r)
             => new PointF(cx + (float)(re * r), cy - (float)(im * r));
@@ -750,15 +856,18 @@ namespace Iruza
             var g = e.Graphics;
             g.SmoothingMode = SmoothingMode.AntiAlias;
             g.TextRenderingHint = TextRenderingHint.ClearTypeGridFit;
-            float cx = Width / 2f, cy = Height / 2f, rad = Math.Min(cx, cy) - 36;
+
+            // [ZOOM] 배율/이동량이 반영된 좌표계
+            GetGeometry(out float cx, out float cy, out float rad);
             DrawGrid(g, cx, cy, rad);
-            // [CHG] 체크된 모든 데이터셋을 순서대로 겹쳐 그림
-            DrawLegend(g);   // [ADD] 2개 이상 겹칠 때 데이터셋 범례 표시
 
             // [CHG] 체크된 모든 데이터셋을 순서대로 겹쳐 그림
             foreach (var ov in _overlays)
                 if (ov.Ds != null && ov.Ds.Steps.Any())
                     DrawData(g, cx, cy, rad, ov);
+            // [ZOOM] 확대 시 데이터에 가려지지 않도록 범례는 데이터 위에 그림
+            DrawLegend(g);
+            DrawZoomBadge(g);
 
             var hovered = _overlays.FirstOrDefault(x => x.DsIndex == _hlDsIdx);
             if (hovered != null && hovered.Ds != null && _hlStepIdx >= 0 && _hlStepIdx < hovered.Ds.Steps.Count)
@@ -770,6 +879,19 @@ namespace Iruza
                     DrawTooltip(g, hovered, s, sp);
                 }
             }
+        }
+        // [ZOOM] 우하단에 현재 배율 표시 (100%일 때는 표시하지 않음)
+        void DrawZoomBadge(Graphics g)
+        {
+            if (Math.Abs(_zoom - 1f) < 1e-3f) return;
+            string txt = $"×{_zoom:0.##}  (더블클릭: 원래 크기)";
+            using var f = new Font("Arial", 8f);
+            var sz = g.MeasureString(txt, f);
+            float x = Width - sz.Width - 10, y = Height - sz.Height - 8;
+            using var bg = new SolidBrush(Color.FromArgb(210, 255, 255, 255));
+            g.FillRectangle(bg, x - 4, y - 2, sz.Width + 8, sz.Height + 4);
+            g.DrawRectangle(Pens.LightGray, x - 4, y - 2, sz.Width + 8, sz.Height + 4);
+            g.DrawString(txt, f, Brushes.DimGray, x, y);
         }
 
         void DrawGrid(Graphics g, float cx, float cy, float rad)
@@ -918,7 +1040,7 @@ namespace Iruza
             for (int li = 0; li < lines.Length; li++)
                 g.DrawString(lines[li], f, Brushes.Black, tx + 5, ty + 4 + li * 13);
         }
-
+        // PNG 저장은 확대 상태와 무관하게 항상 전체 스미스차트(100%)로 저장
         public void SaveToPng(string path, int w, int h)
         {
             using var bmp = new Bitmap(w, h);
@@ -927,19 +1049,110 @@ namespace Iruza
             g.Clear(Color.White);
             float cx = w / 2f, cy = h / 2f, rad = Math.Min(cx, cy) - 50;
             DrawGrid(g, cx, cy, rad);
-            DrawLegend(g);
             foreach (var ov in _overlays)
                 if (ov.Ds != null && ov.Ds.Steps.Any())
                     DrawData(g, cx, cy, rad, ov);
+            DrawLegend(g);
             bmp.Save(path, System.Drawing.Imaging.ImageFormat.Png);
+        }
+        // ════════════════ [ZOOM] 마우스/키보드 입력 ════════════════
+
+        // 마우스가 차트 위로 오면 휠 입력을 받을 수 있게 포커스를 가져옴
+        // (단, 그리드 셀 편집 중이면 편집이 끊기지 않도록 포커스를 뺏지 않음)
+        protected override void OnMouseEnter(EventArgs e)
+        {
+            base.OnMouseEnter(e);
+            if (!Focused && !IsOtherControlEditing()) Focus();
+        }
+
+        bool IsOtherControlEditing()
+        {
+            Control a = FindForm()?.ActiveControl;
+            while (a is ContainerControl cc && cc.ActiveControl != null) a = cc.ActiveControl;
+            if (a is DataGridView dgv && dgv.IsCurrentCellInEditMode) return true;
+            if (a is TextBoxBase || a is ComboBox || a is NumericUpDown) return true;
+            if (a?.Parent is DataGridView) return true;   // DataGridView 편집 컨트롤
+            return false;
+        }
+
+        // 휠: 커서 위치를 기준으로 확대/축소
+        protected override void OnMouseWheel(MouseEventArgs e)
+        {
+            base.OnMouseWheel(e);
+            float factor = e.Delta > 0 ? ZoomStep : 1f / ZoomStep;
+            ZoomAt(_zoom * factor, e.Location);
+        }
+
+        // 왼쪽 버튼 드래그: 화면 이동
+        protected override void OnMouseDown(MouseEventArgs e)
+        {
+            base.OnMouseDown(e);
+            if (!Focused) Focus();
+            if (e.Button == MouseButtons.Left || e.Button == MouseButtons.Middle)
+            {
+                _panning = true;
+                _panMoved = false;
+                _panStartMouse = e.Location;
+                _panStartOffset = _pan;
+                Capture = true;
+            }
+        }
+
+        protected override void OnMouseUp(MouseEventArgs e)
+        {
+            base.OnMouseUp(e);
+            if (_panning)
+            {
+                _panning = false;
+                Capture = false;
+                Cursor = Cursors.Default;
+            }
+        }
+
+        // 더블클릭: 원래 크기로
+        protected override void OnMouseDoubleClick(MouseEventArgs e)
+        {
+            base.OnMouseDoubleClick(e);
+            if (e.Button == MouseButtons.Left) ResetZoom();
+        }
+
+        // 키보드: + 확대, - 축소, 0 원래 크기
+        protected override void OnKeyDown(KeyEventArgs e)
+        {
+            base.OnKeyDown(e);
+            switch (e.KeyCode)
+            {
+                case Keys.Add:
+                case Keys.Oemplus:
+                    ZoomIn(); e.Handled = true; break;
+                case Keys.Subtract:
+                case Keys.OemMinus:
+                    ZoomOut(); e.Handled = true; break;
+                case Keys.D0:
+                case Keys.NumPad0:
+                    ResetZoom(); e.Handled = true; break;
+            }
         }
 
         // [CHG] 모든 overlay(데이터셋)의 포인트를 통틀어 가장 가까운 점을 찾음
         protected override void OnMouseMove(MouseEventArgs e)
         {
             base.OnMouseMove(e);
+
+            // [ZOOM] 드래그 중이면 화면 이동만 처리 (3px 이상 움직였을 때부터 이동으로 간주)
+            if (_panning)
+            {
+                int dx = e.X - _panStartMouse.X, dy = e.Y - _panStartMouse.Y;
+                if (!_panMoved && dx * dx + dy * dy < 9) return;
+                _panMoved = true;
+                _pan = new PointF(_panStartOffset.X + dx, _panStartOffset.Y + dy);
+                Cursor = Cursors.SizeAll;
+                Invalidate();
+                return;
+            }
+
             if (_overlays.Count == 0) return;
-            float cx = Width / 2f, cy = Height / 2f, rad = Math.Min(cx, cy) - 36;
+            GetGeometry(out float cx, out float cy, out float rad);   // [ZOOM] 확대 좌표계로 hit-test
             int bestDs = -1, bestStep = -1; double bestD = 16 * 16;
             foreach (var ov in _overlays)
             {
