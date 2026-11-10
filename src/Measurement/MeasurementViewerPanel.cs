@@ -710,7 +710,7 @@ namespace Iruza
 
         // ── [ZOOM] 확대/축소 상태 ──
         private const float ZoomMin = 0.5f;    // 최소 50%
-        private const float ZoomMax = 20f;     // 최대 2000%
+        private const float ZoomMax = 200f;     // 최대 2000%
         private const float ZoomStep = 1.25f;  // 버튼/휠 1회당 배율
         private float _zoom = 1f;              // 현재 배율 (1 = 원래 크기)
         private PointF _pan = PointF.Empty;    // 차트 중심의 이동량(px)
