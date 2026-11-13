@@ -38,14 +38,22 @@ builder.Services.Configure<ImporterOptions>(
 // -----------------------------------------------------------------
 builder.Services.AddSingleton<CsvParserService>();
 
+var connectionString = builder.Configuration.GetConnectionString("MeasurementDb")
+    ?? throw new InvalidOperationException("ConnectionStrings:MeasurementDb 설정이 없습니다.");
+
 builder.Services.AddSingleton(sp =>
 {
-    var connectionString = builder.Configuration.GetConnectionString("MeasurementDb")
-        ?? throw new InvalidOperationException("ConnectionStrings:MeasurementDb 설정이 없습니다.");
-
     var logger = sp.GetRequiredService<ILogger<PostgresRepository>>();
     return new PostgresRepository(connectionString, logger);
 });
+
+// -----------------------------------------------------------------
+// 호스티드 서비스 등록 (등록 순서 = 시작 순서)
+// 1) DatabaseInitializer : DB(measurement_db)가 없으면 생성
+// 2) Worker              : 스키마 생성(EnsureSchemaAsync) 후 CSV 적재 루프
+// -----------------------------------------------------------------
+builder.Services.AddHostedService(sp =>
+    new DatabaseInitializer(connectionString, sp.GetRequiredService<ILogger<DatabaseInitializer>>()));
 
 builder.Services.AddHostedService<Worker>();
 

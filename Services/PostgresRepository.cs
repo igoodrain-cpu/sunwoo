@@ -21,7 +21,7 @@ public sealed class PostgresRepository
         const string ddl = """
             DO $$
             BEGIN
-                CREATE TYPE rf_channel AS ENUM ('source', 'bias');
+                CREATE TYPE rf_channel AS ENUM ('source', 'bias', 'source_out', 'bias_out');
             EXCEPTION
                 WHEN duplicate_object THEN NULL;
             END $$;
@@ -65,6 +65,7 @@ public sealed class PostgresRepository
                 b_preset_tune        NUMERIC(6,2),
                 b_load_pos           NUMERIC(6,2),
                 b_tune_pos           NUMERIC(6,2),
+                vdc                  NUMERIC(8,2),  
                 ar_flow              NUMERIC(8,2),
                 o2_flow              NUMERIC(8,2),
                 apc_pressure         NUMERIC(8,2),
@@ -116,9 +117,27 @@ public sealed class PostgresRepository
 
         await using var conn = new NpgsqlConnection(_connectionString);
         await conn.OpenAsync(cancellationToken);
-        await using var cmd = new NpgsqlCommand(ddl, conn);
-        await cmd.ExecuteNonQueryAsync(cancellationToken);
+
+        await using (var cmd = new NpgsqlCommand(ddl, conn))
+        {
+            await cmd.ExecuteNonQueryAsync(cancellationToken);
+        }
+
+        // 기존 DB는 rf_channel이 ('source', 'bias')로 이미 생성돼 있어 위 CREATE TYPE이 스킵된다.
+        // Out 채널 라벨을 여기서 보강한다. ALTER TYPE ... ADD VALUE는 PostgreSQL 11 이하에서
+        // 트랜잭션 블록(여러 문장을 한 커맨드로 보낸 암묵적 트랜잭션 포함) 안에서 실행할 수 없으므로
+        // 라벨마다 단독 커맨드로 실행한다.
+        foreach (var label in RfChannelLabels)
+        {
+            await using var enumCmd = new NpgsqlCommand(
+                $"ALTER TYPE rf_channel ADD VALUE IF NOT EXISTS '{label}';", conn);
+            await enumCmd.ExecuteNonQueryAsync(cancellationToken);
+        }
+
+        _logger.LogInformation("스키마 확인 완료. rf_channel 라벨: {Labels}", string.Join(", ", RfChannelLabels));
     }
+    // RfChannel enum ↔ DB rf_channel 라벨. InsertSmithChartPointAsync의 매핑과 항상 일치해야 한다.
+    private static readonly string[] RfChannelLabels = ["source", "bias", "source_out", "bias_out"];
 
     public async Task<bool> IsAlreadyProcessedAsync(string fileHash, CancellationToken cancellationToken)
     {
@@ -160,6 +179,16 @@ public sealed class PostgresRepository
                 if (step.BiasPoint.HasValues)
                 {
                     await InsertSmithChartPointAsync(conn, tx, stepId, step.BiasPoint, cancellationToken);
+                }
+
+                if (step.SourcePointOut.HasValues)
+                {
+                    await InsertSmithChartPointAsync(conn, tx, stepId, step.SourcePointOut, cancellationToken);
+                }
+
+                if (step.BiasPointOut.HasValues)
+                {
+                    await InsertSmithChartPointAsync(conn, tx, stepId, step.BiasPointOut, cancellationToken);
                 }
             }
 
@@ -259,7 +288,7 @@ public sealed class PostgresRepository
                 srf_freq, s_fwd, s_ref, s_vrms, s_irms, s_phase, s_delivered_pwr,
                 s_preset_load, s_preset_tune, s_load_pos, s_tune_pos,
                 br_freq, b_fwd, b_ref, b_vrms, b_irms, b_phase, b_delivered_pwr,
-                b_preset_load, b_preset_tune, b_load_pos, b_tune_pos,
+                b_preset_load, b_preset_tune, b_load_pos, b_tune_pos,vdc,
                 ar_flow, o2_flow, apc_pressure, apc_position, vvc1, vvc2, vvc3, proc_status
             )
             VALUES (
@@ -267,7 +296,7 @@ public sealed class PostgresRepository
                 @srf_freq, @s_fwd, @s_ref, @s_vrms, @s_irms, @s_phase, @s_delivered_pwr,
                 @s_preset_load, @s_preset_tune, @s_load_pos, @s_tune_pos,
                 @br_freq, @b_fwd, @b_ref, @b_vrms, @b_irms, @b_phase, @b_delivered_pwr,
-                @b_preset_load, @b_preset_tune, @b_load_pos, @b_tune_pos,
+                @b_preset_load, @b_preset_tune, @b_load_pos, @b_tune_pos,@vdc,
                 @ar_flow, @o2_flow, @apc_pressure, @apc_position, @vvc1, @vvc2, @vvc3, @proc_status
             )
             RETURNING step_id;
@@ -301,6 +330,7 @@ public sealed class PostgresRepository
         AddNullableNumeric(cmd, "b_preset_tune", step.BPresetTune);
         AddNullableNumeric(cmd, "b_load_pos", step.BLoadPos);
         AddNullableNumeric(cmd, "b_tune_pos", step.BTunePos);
+        AddNullableNumeric(cmd, "vdc", step.Vdc);
         AddNullableNumeric(cmd, "ar_flow", step.ArFlow);
         AddNullableNumeric(cmd, "o2_flow", step.O2Flow);
         AddNullableNumeric(cmd, "apc_pressure", step.ApcPressure);
@@ -336,7 +366,14 @@ public sealed class PostgresRepository
 
         await using var cmd = new NpgsqlCommand(sql, conn, tx);
         cmd.Parameters.AddWithValue("step_id", NpgsqlDbType.Bigint, stepId);
-        cmd.Parameters.AddWithValue("channel", NpgsqlDbType.Text, point.Channel == RfChannel.Source ? "source" : "bias");
+        cmd.Parameters.AddWithValue("channel", NpgsqlDbType.Text, point.Channel switch
+        {
+            RfChannel.Source => "source",
+            RfChannel.Bias => "bias",
+            RfChannel.Source_Out => "source_out",
+            RfChannel.Bias_Out => "bias_out",
+            _ => throw new ArgumentOutOfRangeException(nameof(point.Channel), point.Channel, null)
+        });
         AddNullableNumeric(cmd, "vout_vrms", point.VoutVrms);
         AddNullableNumeric(cmd, "iout_arms", point.IoutArms);
         AddNullableNumeric(cmd, "phase_deg", point.PhaseDeg);

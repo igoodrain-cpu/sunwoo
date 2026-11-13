@@ -10,7 +10,7 @@ public sealed class ImporterOptions
     public string ErrorFolder { get; set; } = string.Empty;
     public string? DefaultRecipeName { get; set; }
     public string? DefaultEquipmentId { get; set; }
-    public int PollingIntervalSeconds { get; set; } = 5;
+    public int PollingIntervalSeconds { get; set; } = 30;
     public string FileSearchPattern { get; set; } = "*.csv";
 
     /// <summary>

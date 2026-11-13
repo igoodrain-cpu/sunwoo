@@ -53,7 +53,7 @@ DBA가 직접 관리하고 싶다면 `sql/schema.sql`을 실행한 뒤, `Program
     "ErrorFolder": "/data/measurement/error",
     "DefaultRecipeName": "DEFAULT_RECIPE",
     "DefaultEquipmentId": "EQ-01",
-    "PollingIntervalSeconds": 5
+    "PollingIntervalSeconds": 30
   }
 }
 ```

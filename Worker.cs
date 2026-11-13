@@ -5,6 +5,7 @@ namespace MeasurementImporterService;
 
 public sealed class Worker : BackgroundService
 {
+    private const int BackupRetentionMonths = 6;
     private readonly ILogger<Worker> _logger;
     private readonly ImporterOptions _options;
     private readonly CsvParserService _parser;
@@ -35,6 +36,7 @@ public sealed class Worker : BackgroundService
         {
             try
             {
+                CleanupOldBackupFiles();
                 await ProcessIncomingFilesAsync(stoppingToken);
             }
             catch (Exception ex)
@@ -154,6 +156,31 @@ public sealed class Worker : BackgroundService
         }
 
         File.Move(filePath, destination);
+    }
+
+    private void CleanupOldBackupFiles()
+    {
+        var backupFolder = GetBackupFolder();
+        var cutoffUtc = DateTime.UtcNow.AddMonths(-BackupRetentionMonths);
+
+        foreach (var filePath in Directory.EnumerateFiles(backupFolder, "*", SearchOption.TopDirectoryOnly))
+        {
+            try
+            {
+                var lastWriteTimeUtc = File.GetLastWriteTimeUtc(filePath);
+                if (lastWriteTimeUtc > cutoffUtc)
+                {
+                    continue;
+                }
+
+                File.Delete(filePath);
+                _logger.LogInformation("백업 보관기간(6개월) 경과 파일 삭제: {FileName}", Path.GetFileName(filePath));
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "백업 폴더 정리 중 파일 삭제 실패: {FileName}", Path.GetFileName(filePath));
+            }
+        }
     }
 
     private string GetBackupFolder() =>
