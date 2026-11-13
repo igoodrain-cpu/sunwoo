@@ -8,6 +8,10 @@
 //         - 왼쪽 버튼 드래그: 화면 이동(Pan)
 //         - 더블클릭 또는 키보드 0: 원래 크기로 복귀
 //         - 키보드 + / - : 확대/축소
+//  [AI] AI 이상 진단 결과 표시 (Robust Mahalanobis + Isolation Forest 앙상블)
+//         - 스미스차트: 이상 스텝에 빨간 경고 링 + "!" / 좌하단 이상 스텝 수 / 툴팁에 판정·주도 요인·기여 변수
+//         - 측정 테이블: AI 판정·AI 점수·주도 요인·기여 변수·AI 모델 컬럼, 이상 행 배경 강조
+//         - 요약 바: AI 이상 스텝 수
 //  만든이: 이선우
 // ════════════════════════════════════════════════════════════════
 using System;
@@ -18,6 +22,7 @@ using System.Drawing.Text;
 using System.Linq;
 using System.Threading;
 using System.Windows.Forms;
+using Iruza.Diagnostics.Anomaly;
 
 namespace Iruza
 {
@@ -47,6 +52,11 @@ namespace Iruza
         private int _activeIdx = -1;
         private bool _isUpdatingSelection = false;
 
+        // [AI] 데이터셋별 AI 진단 결과 (ds.Steps와 같은 순서, 판정 불가 스텝은 null)
+        private readonly Dictionary<MeasurementDataset, IList<AnomalyResult>> _aiResults =
+            new Dictionary<MeasurementDataset, IList<AnomalyResult>>();
+        private static readonly Color AiAnomalyRowColor = Color.FromArgb(255, 228, 225);
+
         public MeasurementViewerPanel()
         {
             BackColor = Color.White;
@@ -71,7 +81,9 @@ namespace Iruza
 
 
         // 트리에서 선택한 데이터셋을 채널별 이름으로 등록하고 차트 겹쳐보기를 갱신합니다.
-        public void OverlappedChartDisplay(int i, TreeNode root, string pName, MeasurementDataset pMeasurementDataset)
+        // [AI] anomalies: 이 데이터셋의 AI 진단 결과 (모델이 없으면 null)
+        public void OverlappedChartDisplay(int i, TreeNode root, string pName, MeasurementDataset pMeasurementDataset,
+                                           IList<AnomalyResult> anomalies = null)
         {
             BackColor = Color.White;
 
@@ -97,6 +109,10 @@ namespace Iruza
                 }
 
             }
+
+            // [AI] 차트/테이블을 그리기 전에 진단 결과를 먼저 연결
+            if (anomalies != null && pMeasurementDataset != null)
+                _aiResults[pMeasurementDataset] = anomalies;
 
             if (_dsList.Count == 0)
             {
@@ -200,6 +216,30 @@ namespace Iruza
         public void ZoomOut() => _chart?.ZoomOut();
         public void ResetZoom() => _chart?.ResetZoom();
 
+        // ── [AI] 진단 결과 연결 ──
+        /// <summary>데이터셋의 AI 진단 결과를 설정합니다 (null이면 제거). 여러 개를 바꿀 때는 refresh=false 후 RefreshView()</summary>
+        public void SetAnomalyResults(MeasurementDataset ds, IList<AnomalyResult> results, bool refresh = true)
+        {
+            if (ds == null) return;
+            if (results == null) _aiResults.Remove(ds);
+            else _aiResults[ds] = results;
+            if (refresh) RefreshAll();
+        }
+
+        public IList<AnomalyResult> GetAnomalyResults(MeasurementDataset ds)
+        {
+            if (ds == null) return null;
+            return _aiResults.TryGetValue(ds, out var r) ? r : null;
+        }
+
+        public void ClearAnomalyResults()
+        {
+            _aiResults.Clear();
+            RefreshAll();
+        }
+
+        public void RefreshView() => RefreshAll();
+
         // [ADD] 트리노드 등 외부에서 특정 데이터셋을 이 뷰어에 추가하고 싶을 때 호출
         public void AddDataset(MeasurementDataset ds, bool select = true)
         {
@@ -213,6 +253,7 @@ namespace Iruza
 
         public void ClearDatasets()
         {
+            _aiResults.Clear();   // [AI]
             _dsList.Clear();
             _selectedDsIndices.Clear();
             _activeDsIndex = -1;
@@ -232,6 +273,7 @@ namespace Iruza
         {
             if (_activeDsIndex < 0 || _activeDsIndex >= _dsList.Count) return;
             int removed = _activeDsIndex;
+            _aiResults.Remove(_dsList[removed]);   // [AI]
             _dsList.RemoveAt(removed);
 
             // 삭제된 인덱스 이후 항목들의 인덱스를 1씩 당겨서 선택 목록 재정렬
@@ -269,6 +311,7 @@ namespace Iruza
                 string name = dataset.Name;
                 if (name == pName)
                 {
+                    _aiResults.Remove(dataset);   // [AI]
                     _dsList.Remove(dataset);
                     break;
                 }
@@ -285,6 +328,7 @@ namespace Iruza
         /// </summary>
         public void RemoveAllDatasets()
         {
+            _aiResults.Clear();   // [AI]
             _dsList.Clear();
             _selectedDsIndices.Clear();
             _activeDsIndex = -1;
@@ -428,6 +472,7 @@ namespace Iruza
             };
 
             _chart = new MeasurementChartPanel { Dock = DockStyle.Fill };
+            _chart.AnomalyLookup = GetAnomalyResults;   // [AI] 차트가 데이터셋별 진단 결과를 조회
             // [CHG] 그리드 행 하이라이트는 "활성 데이터셋"의 포인트를 hover 했을 때만 반영
             _chart.StepHovered += (dsIdx, stepIdx) =>
             {
@@ -547,11 +592,19 @@ namespace Iruza
                 ("O2_Flow","O2",true),("APC_Pressure","APC Pre",true),
                 ("APC_Position","APC Pos",true),("VVC1","VVC1",true),
                 ("VVC2","VVC2",true),("VVC3","VVC3",true),
-                ("Proc_Status","Proc Status",true)
+                ("Proc_Status","Proc Status",true),
+                // [AI] 진단 결과 컬럼 (값은 맨 뒤에 추가하고, 화면에서는 Step Name 바로 뒤에 보이도록 DisplayIndex 지정)
+                ("AI_Result","AI 판정",true),("AI_Score","AI 점수\n(점수/기준)",true),
+                ("AI_Driver","주도 요인",true),("AI_Contrib","기여 변수",true),("AI_Model","AI 모델",true)
             };
             foreach (var (n, h, ro) in cols)
                 g.Columns.Add(new DataGridViewTextBoxColumn
                 { Name = n, HeaderText = h, ReadOnly = ro, SortMode = DataGridViewColumnSortMode.Automatic });
+
+            int di = g.Columns["Step_Name"].DisplayIndex + 1;
+            foreach (var n in new[] { "AI_Result", "AI_Score", "AI_Driver", "AI_Contrib", "AI_Model" })
+                g.Columns[n].DisplayIndex = di++;
+            g.Columns["AI_Result"].DefaultCellStyle.Font = new Font("Malgun Gothic", 8f, FontStyle.Bold);
             return g;
         }
 
@@ -572,8 +625,11 @@ namespace Iruza
         {
             _grid.Rows.Clear();
             if (_ds == null) return;
-            foreach (var s in _ds.Steps)
+            var ai = GetAnomalyResults(_ds);   // [AI]
+            for (int si = 0; si < _ds.Steps.Count; si++)
             {
+                var s = _ds.Steps[si];
+                var r = (ai != null && si < ai.Count) ? ai[si] : null;
                 _grid.Rows.Add(
                     s.Step, s.Step_Name, s.Vout_Vrms.ToString("F4"),s.Iout_Arms.ToString("F4"),
                     s.Phase_deg.ToString("F2"), s.R.ToString("F4"), s.X.ToString("F4"),
@@ -583,9 +639,26 @@ namespace Iruza
                     s.ForwardP_W.ToString("F4"), s.ReflectedP_W.ToString("F4"),
                     s.DeliveredP_W.ToString("F4"), s.ReturnLoss_dB.ToString("F2"),
                     s.Efficiency_pct.ToString("F1"),s.Vdc.ToString("F4"), s.Ar_Flow.ToString("F1"), s.O2_Flow.ToString("F1"),
-                    s.APC_Pressure.ToString("F2"), s.APC_Position.ToString("F2"), s.VVC1.ToString("F2"), s.VVC2.ToString("F2"), s.VVC3.ToString("F2"),s.Proc_Status
+                    s.APC_Pressure.ToString("F2"), s.APC_Position.ToString("F2"), s.VVC1.ToString("F2"), s.VVC2.ToString("F2"), s.VVC3.ToString("F2"),s.Proc_Status,
+                    // [AI]
+                    ai == null ? "" : r == null ? "판정 불가" : r.IsAnomaly ? "이상" : "정상",
+                    r == null ? "" : $"{r.Fused:F2} / {r.FusedThreshold:F2}",
+                    r == null || !r.IsAnomaly ? "" : r.Driver,
+                    r == null ? "" : string.Join(", ", r.TopContributors),
+                    r == null ? "" : (r.ModelKey == "GLOBAL" ? "GLOBAL(참고)" : r.ModelKey)
                 );
                 var row = _grid.Rows[_grid.Rows.Count - 1];
+
+                // [AI] 이상 스텝 행 강조
+                if (r != null && r.IsAnomaly)
+                {
+                    row.DefaultCellStyle.BackColor = AiAnomalyRowColor;
+                    row.Cells["AI_Result"].Style.ForeColor = MeasurementChartPanel.AnomalyColor;
+                }
+                else if (r != null)
+                {
+                    row.Cells["AI_Result"].Style.ForeColor = Color.SeaGreen;
+                }
             }
         }
 
@@ -597,6 +670,14 @@ namespace Iruza
                 $"최적 VSWR: {b?.VSWR:F3} (S{b?.Step})  |  " +
                 $"최악: {w?.VSWR:F3} (S{w?.Step})  |  " +
                 $"평균 VSWR: {_ds.AvgVSWR:F3}  |  평균 효율: {_ds.AvgEfficiency:F1}%";
+
+            // [AI] 이상 스텝 수
+            var ai = GetAnomalyResults(_ds);
+            if (ai != null)
+            {
+                int judged = ai.Count(r => r != null), anomalies = ai.Count(r => r != null && r.IsAnomaly);
+                _statLbl.Text += $"  |  AI 이상: {anomalies}/{judged} 스텝";
+            }
         }
 
         void HighlightRow(int idx)
@@ -704,13 +785,23 @@ namespace Iruza
 
         private List<Overlay> _overlays = new List<Overlay>();
         private int _colorMode = 0;
+
+        // [AI] 데이터셋 → AI 진단 결과 조회 (뷰어 패널이 연결). 결과 목록은 ds.Steps와 같은 순서
+        public Func<MeasurementDataset, IList<AnomalyResult>> AnomalyLookup { get; set; }
+        public static readonly Color AnomalyColor = Color.FromArgb(220, 20, 60);
+
+        AnomalyResult GetAnomaly(MeasurementDataset ds, int stepIdx)
+        {
+            var list = (ds == null) ? null : AnomalyLookup?.Invoke(ds);
+            return (list != null && stepIdx >= 0 && stepIdx < list.Count) ? list[stepIdx] : null;
+        }
         private int _hlDsIdx = -1;   // [CHG] 하이라이트 대상 (데이터셋 인덱스, 스텝 인덱스)
         private int _hlStepIdx = -1;
         public event Action<int, int> StepHovered;   // (dsIndex, stepIndex), 해제 시 (-1,-1)
 
         // ── [ZOOM] 확대/축소 상태 ──
         private const float ZoomMin = 0.5f;    // 최소 50%
-        private const float ZoomMax = 20f;     // 최대 2000%
+        private const float ZoomMax = 200f;     // 최대 2000%
         private const float ZoomStep = 1.25f;  // 버튼/휠 1회당 배율
         private float _zoom = 1f;              // 현재 배율 (1 = 원래 크기)
         private PointF _pan = PointF.Empty;    // 차트 중심의 이동량(px)
@@ -867,6 +958,7 @@ namespace Iruza
                     DrawData(g, cx, cy, rad, ov);
             // [ZOOM] 확대 시 데이터에 가려지지 않도록 범례는 데이터 위에 그림
             DrawLegend(g);
+            DrawAiLegend(g, Height);   // [AI]
             DrawZoomBadge(g);
 
             var hovered = _overlays.FirstOrDefault(x => x.DsIndex == _hlDsIdx);
@@ -876,7 +968,7 @@ namespace Iruza
                 if (s.GammaMag <= 1.05)
                 {
                     var sp = Sp(s.Gamma_Real, s.Gamma_Imag, cx, cy, rad);
-                    DrawTooltip(g, hovered, s, sp);
+                    DrawTooltip(g, hovered, s, sp, GetAnomaly(hovered.Ds, _hlStepIdx));   // [AI]
                 }
             }
         }
@@ -981,6 +1073,18 @@ namespace Iruza
                 g.DrawEllipse(ring, sp.X - sz, sp.Y - sz, sz * 2, sz * 2);
                 if (hl) g.DrawEllipse(new Pen(Color.Black, 1.5f), sp.X - sz - 2, sp.Y - sz - 2, (sz + 2) * 2, (sz + 2) * 2);
 
+                // [AI] 이상 판정 스텝: 빨간 경고 링 + 좌상단 "!"
+                var ai = GetAnomaly(ds, i);
+                if (ai != null && ai.IsAnomaly)
+                {
+                    float wr = sz + 5;
+                    using (var warn = new Pen(AnomalyColor, 2.2f))
+                        g.DrawEllipse(warn, sp.X - wr, sp.Y - wr, wr * 2, wr * 2);
+                    using (var wf = new Font("Arial", 9f, FontStyle.Bold))
+                    using (var wb = new SolidBrush(AnomalyColor))
+                        g.DrawString("!", wf, wb, sp.X - wr - 8, sp.Y - wr - 10);
+                }
+
                 g.DrawString(s.Step.ToString(), new Font("Arial", 7f, FontStyle.Bold),
                     new SolidBrush(ov.Color), sp.X + sz + 2, sp.Y - 4);
             }
@@ -1001,9 +1105,44 @@ namespace Iruza
             }
         }
 
-        void DrawTooltip(Graphics g, Overlay ov, MeasurementStep s, PointF sp)
+        // [AI] 좌하단: 화면에 겹쳐진 모든 데이터셋의 AI 이상 스텝 수 (모델 결과가 있을 때만)
+        void DrawAiLegend(Graphics g, float bottom)
         {
-            string[] lines =
+            if (AnomalyLookup == null) return;
+            int judged = 0, anomalies = 0;
+            foreach (var ov in _overlays)
+            {
+                var list = AnomalyLookup(ov.Ds);
+                if (list == null) continue;
+                foreach (var r in list)
+                {
+                    if (r == null) continue;
+                    judged++;
+                    if (r.IsAnomaly) anomalies++;
+                }
+            }
+            if (judged == 0) return;
+
+            string txt = $"AI 진단  이상 {anomalies} / {judged} 스텝";
+            using (var f = new Font("Malgun Gothic", 8.5f, FontStyle.Bold))
+            {
+                var tsz = g.MeasureString(txt, f);
+                float x = 8, y = bottom - tsz.Height - 10;
+                using (var bg = new SolidBrush(Color.FromArgb(220, 255, 255, 255)))
+                    g.FillRectangle(bg, x - 4, y - 3, tsz.Width + 26, tsz.Height + 6);
+                g.DrawRectangle(Pens.LightGray, x - 4, y - 3, tsz.Width + 26, tsz.Height + 6);
+
+                Color c = anomalies > 0 ? AnomalyColor : Color.SeaGreen;
+                using (var p = new Pen(c, 2f))
+                    g.DrawEllipse(p, x, y + tsz.Height / 2 - 6, 12, 12);
+                using (var b = new SolidBrush(c))
+                    g.DrawString(txt, f, b, x + 18, y);
+            }
+        }
+
+        void DrawTooltip(Graphics g, Overlay ov, MeasurementStep s, PointF sp, AnomalyResult ai = null)
+        {
+            var lines = new List<string>
             {
                 $"[{ov.Name}]",
                 $"Step {s.Step}",
@@ -1028,17 +1167,29 @@ namespace Iruza
                 $"VVC2 = {s.VVC2:F2} pF",
                 $"VVC3 = {s.VVC3:F2} pF"
             };
+
+            // [AI] 진단 결과
+            if (ai != null)
+            {
+                lines.Add("── AI 진단 ──");
+                lines.Add($"판정 = {(ai.IsAnomaly ? "이상" : "정상")}  ({ai.Fused:F2} / 기준 {ai.FusedThreshold:F2})");
+                if (ai.IsAnomaly) lines.Add($"주도 = {ai.Driver}");
+                lines.Add($"기여 = {string.Join(", ", ai.TopContributors)}");
+                lines.Add($"모델 = {(ai.ModelKey == "GLOBAL" ? "GLOBAL(참고용)" : ai.ModelKey)}");
+            }
+
             var f = new Font("Consolas", 7.5f);
-            float fw = lines.Max(l => g.MeasureString(l, f).Width) + 10, fh = lines.Length * 13f + 8;
+            float fw = lines.Max(l => g.MeasureString(l, f).Width) + 10, fh = lines.Count * 13f + 8;
             float tx = sp.X + 12, ty = sp.Y - fh / 2;
             ty = sp.Y - fh - 12;
             if (tx + fw > Width) tx = sp.X - fw - 12;
             if (ty < 4) ty = sp.Y + 12;
             if (ty + fh > Height) ty = Height - fh - 4;
             g.FillRectangle(new SolidBrush(Color.FromArgb(240, 245, 255, 255)), tx, ty, fw, fh);
-            g.DrawRectangle(new Pen(ov.Color), tx, ty, fw, fh);
-            for (int li = 0; li < lines.Length; li++)
-                g.DrawString(lines[li], f, Brushes.Black, tx + 5, ty + 4 + li * 13);
+            g.DrawRectangle(new Pen(ai != null && ai.IsAnomaly ? AnomalyColor : ov.Color, ai != null && ai.IsAnomaly ? 2f : 1f), tx, ty, fw, fh);
+            for (int li = 0; li < lines.Count; li++)
+                g.DrawString(lines[li], f, (ai != null && ai.IsAnomaly && lines[li].StartsWith("판정")) ? new SolidBrush(AnomalyColor) : Brushes.Black,
+                             tx + 5, ty + 4 + li * 13);
         }
         // PNG 저장은 확대 상태와 무관하게 항상 전체 스미스차트(100%)로 저장
         public void SaveToPng(string path, int w, int h)
@@ -1053,6 +1204,7 @@ namespace Iruza
                 if (ov.Ds != null && ov.Ds.Steps.Any())
                     DrawData(g, cx, cy, rad, ov);
             DrawLegend(g);
+            DrawAiLegend(g, h);   // [AI]
             bmp.Save(path, System.Drawing.Imaging.ImageFormat.Png);
         }
         // ════════════════ [ZOOM] 마우스/키보드 입력 ════════════════

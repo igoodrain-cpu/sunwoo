@@ -2,6 +2,7 @@
 //  PostgresDb.cs  –  PostgreSQL 측정 데이터 접근 계층
 //  만든이: 이선우
 //  Process Run, Step, Smith Chart Point를 조회하여 화면용 모델로 변환
+//  [AI] Golden Run 학습용 일괄 조회 GetMeasurementDatasetsByRunNames 추가
 // ════════════════════════════════════════════════════════════════
 using System;
 using System.Collections.Generic;
@@ -817,6 +818,107 @@ WHERE r.run_id = @run_id
             }
 
             return ds ?? new MeasurementDataset { Name = "EMPTY_" + channel, Z0 = z0 };
+        }
+
+        // [AI] Golden Run 학습용 – 여러 Run의 채널별 전체 스텝을 한 번의 쿼리로 조회합니다.
+        //      (Run마다 따로 조회하면 수백 번 왕복하므로 run_name = ANY(@run_names) 로 묶음)
+        public static List<RunMeasurementDataset> GetMeasurementDatasetsByRunNames(
+            IList<string> runNames, string channel, double z0 = 50.0)
+        {
+            var result = new List<RunMeasurementDataset>();
+            if (runNames == null || runNames.Count == 0) return result;
+
+            const string sql = @"
+SELECT r.run_id, r.run_name, r.recipe_name,
+       s.step_num, s.step_name,
+       p.vout_vrms, p.iout_arms, p.phase_deg,
+       p.r_ohm, p.x_ohm,
+       p.gamma_real, p.gamma_imag, p.gamma_mag, p.vswr,
+       p.z_text, p.z_normalized,
+       p.forward_p_w, p.reflected_p_w, p.delivered_p_w,
+       s.vdc, s.ar_flow, s.o2_flow, s.apc_pressure, s.apc_position,
+       s.vvc1, s.vvc2, s.vvc3, s.proc_status
+FROM process_run r
+INNER JOIN process_step s ON s.run_id = r.run_id
+INNER JOIN smith_chart_point p ON p.step_id = s.step_id
+WHERE r.run_name = ANY(@run_names)
+  AND p.channel = @channel::rf_channel
+ORDER BY r.run_id ASC, s.step_num ASC;";
+
+            var names = new string[runNames.Count];
+            runNames.CopyTo(names, 0);
+            var byRun = new Dictionary<long, RunMeasurementDataset>();
+
+            using (var conn = CreateConnection())
+            using (var cmd = new NpgsqlCommand(sql, conn))
+            {
+                cmd.CommandTimeout = 120;
+                cmd.Parameters.AddWithValue("run_names", names);
+                cmd.Parameters.Add(new NpgsqlParameter("channel", NpgsqlDbType.Unknown) { Value = channel ?? string.Empty });
+                conn.Open();
+
+                using (var reader = cmd.ExecuteReader())
+                {
+                    while (reader.Read())
+                    {
+                        long runId = GetValue<long>(reader, "run_id");
+                        if (!byRun.TryGetValue(runId, out RunMeasurementDataset item))
+                        {
+                            string runName = GetString(reader, "run_name");
+                            item = new RunMeasurementDataset
+                            {
+                                RunId = runId,
+                                RunName = runName,
+                                RecipeName = GetString(reader, "recipe_name"),
+                                Dataset = new MeasurementDataset { Name = runName + "_" + channel, Z0 = z0 }
+                            };
+                            byRun.Add(runId, item);
+                            result.Add(item);
+                        }
+                        item.Dataset.Steps.Add(MapMeasurementStep(reader));
+                    }
+                }
+            }
+
+            return result;
+        }
+
+        // [AI] process_step + smith_chart_point 조인 행 → MeasurementStep (화면 조회 메서드와 같은 매핑)
+        private static MeasurementStep MapMeasurementStep(NpgsqlDataReader reader)
+        {
+            return new MeasurementStep
+            {
+                Step = Convert.ToInt32(GetValue<short>(reader, "step_num")),
+                Step_Name = GetString(reader, "step_name"),
+                Vout_Vrms = ToDouble(GetValue<decimal?>(reader, "vout_vrms")),
+                Iout_Arms = ToDouble(GetValue<decimal?>(reader, "iout_arms")),
+                Phase_deg = ToDouble(GetValue<decimal?>(reader, "phase_deg")),
+                R = ToDouble(GetValue<decimal?>(reader, "r_ohm")),
+                X = ToDouble(GetValue<decimal?>(reader, "x_ohm")),
+                Gamma_Real = ToDouble(GetValue<decimal?>(reader, "gamma_real")),
+                Gamma_Imag = ToDouble(GetValue<decimal?>(reader, "gamma_imag")),
+                VSWR = ToDouble(GetValue<decimal?>(reader, "vswr")),
+                Z_Text = GetString(reader, "z_text"),
+                Z_Normalized = GetString(reader, "z_normalized"),
+                ForwardP_W = ToDouble(GetValue<decimal?>(reader, "forward_p_w")),
+                ReflectedP_W = ToDouble(GetValue<decimal?>(reader, "reflected_p_w")),
+                DeliveredP_W = ToDouble(GetValue<decimal?>(reader, "delivered_p_w")),
+                Vdc = ToDouble(GetValue<decimal?>(reader, "vdc")),
+                Ar_Flow = ToDouble(GetValue<decimal?>(reader, "ar_flow")),
+                O2_Flow = ToDouble(GetValue<decimal?>(reader, "o2_flow")),
+                APC_Pressure = ToDouble(GetValue<decimal?>(reader, "apc_pressure")),
+                APC_Position = ToDouble(GetValue<decimal?>(reader, "apc_position")),
+                VVC1 = ToDouble(GetValue<decimal?>(reader, "vvc1")),
+                VVC2 = ToDouble(GetValue<decimal?>(reader, "vvc2")),
+                VVC3 = ToDouble(GetValue<decimal?>(reader, "vvc3")),
+                Proc_Status = GetValue<short?>(reader, "proc_status") switch
+                {
+                    null => string.Empty,
+                    0 => "Process Run 정상",
+                    1 => "Heavy alarm",
+                    _ => "Unknown"
+                },
+            };
         }
 
         // DataReader의 process_run 행을 ProcessRunRecord로 안전하게 매핑합니다.

@@ -7,21 +7,26 @@
 //  ※ 로딩 오버레이: 별도 스레드(LoadingOverlayForm)에서 실행되어
 //     메인 스레드의 차트 렌더링 시간과 무관하게 Marquee 애니메이션이 끊기지 않음
 //  ※ 루트 노드 옆에 하위 노드 개수 표시 (체크 시 "체크 수/전체 수")
+//  ※ 프로그램 시작 시 ParameterSetting.json 조건으로 Run 목록을 자동 검색하여 트리에 표시
+//     (ParameterForm의 "검색" 버튼과 동일한 조회)
+//  [AI] AI 이상 진단 (Robust Mahalanobis + Isolation Forest 앙상블, RfAnomalyService)
+//     - 메뉴 "AI 진단": 체크한 Run으로 Golden Run 학습 / 현재 화면 다시 진단 / 모델 불러오기 / 모델 정보
+//     - 시작 시 Models\rf_anomaly_model.json.gz 자동 로드, VIEW 때 스텝별 진단 → 차트·테이블 표시
+//     - 좌측 VIEW 버튼 위에 AI 모델 상태 표시
 //  만든이: 이선우
 // ════════════════════════════════════════════════════════════════
 using System;
 using System.Collections.Generic;
 using System.Drawing;
 using System.IO;
-using System.Runtime.Remoting.Channels;
+using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using System.Windows.Forms;
-using System.Xml.Linq;
 using Iruza.src.Parameter;
 using System.Runtime.InteropServices;
 using CheckBoxState = System.Windows.Forms.VisualStyles.CheckBoxState;
-//using System.Windows.Forms.VisualStyles;
+using Iruza.Diagnostics.Anomaly;
 
 namespace Iruza
 {
@@ -43,6 +48,10 @@ namespace Iruza
         // 데이터가 없을 때 루트 아래에 넣는 placeholder 노드 텍스트
         private const string NoDataText = "데이터 없음";
 
+        // 파라미터 설정 파일 경로 (ParameterForm과 동일한 위치)
+        private static string ParameterFilePath =>
+            Path.Combine(Application.StartupPath, "Parameter", "ParameterSetting.json");
+
         MeasurementViewerPanel _sourcePanel;
         MeasurementViewerPanel _biasPanel;
 
@@ -61,19 +70,19 @@ namespace Iruza
         public bool IsInputSensor => _sensorType == SensorType.Input;
         public bool IsOutputSensor => _sensorType == SensorType.Output;
 
-
-
-
-        // 클래스 상단에 추가
         [DllImport("user32.dll", CharSet = CharSet.Auto)]
         private static extern IntPtr SendMessage(IntPtr hWnd, int msg, IntPtr wParam, IntPtr lParam);
 
         private const int TVM_SETEXTENDEDSTYLE = 0x1100 + 44;
         private const int TVS_EX_DOUBLEBUFFER = 0x0004;
 
-
         Label _biasLabel;
         Label _sourceLabel;
+
+        // ── [AI] 이상 진단 ──
+        private readonly RfAnomalyService _ai = new RfAnomalyService();
+        private Label _aiStatusLabel;
+        private List<LoadedRunData> _lastLoadedRuns = new List<LoadedRunData>();   // 재진단용 (현재 화면에 그려진 Run)
 
         private sealed class LoadedRunData
         {
@@ -82,6 +91,13 @@ namespace Iruza
             public MeasurementDataset BiasDataset { get; set; }
             public string SourceStatus { get; set; }
             public string BiasStatus { get; set; }
+
+            // [AI]
+            public string RecipeName { get; set; }
+            public string SourceChannel { get; set; }
+            public string BiasChannel { get; set; }
+            public IList<AnomalyResult> SourceAnomalies { get; set; }
+            public IList<AnomalyResult> BiasAnomalies { get; set; }
         }
 
         private bool _isCheckPropagating = false; // 재귀 호출/이벤트 중복 방지 플래그
@@ -97,7 +113,6 @@ namespace Iruza
             Font = new Font("Malgun Gothic", 9f);
             ApplyAppIcon();   // 타이틀바·작업 표시줄 아이콘 (H&iruja)
 
-
             _tree = new TreeView
             {
                 Dock = DockStyle.Fill,
@@ -106,29 +121,31 @@ namespace Iruza
                 HideSelection = false,
                 FullRowSelect = true,
                 ShowLines = true,
-                //CheckBoxes = true,
                 CheckBoxes = false,
                 ItemHeight = 26,
-                DrawMode = TreeViewDrawMode.OwnerDrawAll   // ← 추가
+                DrawMode = TreeViewDrawMode.OwnerDrawAll
             };
 
             _tree.HandleCreated += (s, e) => EnableTreeViewDoubleBuffer(_tree);
             _tree.DrawNode += Tree_DrawNode;
-            _tree.MouseDown += Tree_MouseDown;   // ← NodeMouseClick 대신 MouseDown
+            _tree.MouseDown += Tree_MouseDown;
 
             BuildMenu();
             BuildTabs();   // Dock=Fill → 반드시 먼저 Controls.Add
             BuildTree();   // Dock=Left → 그 다음에 Controls.Add
 
-            //_tree.AfterCheck += tree_AfterCheck;
-
+            // [ADD] 화면이 표시된 직후 ParameterSetting.json 조건으로 Run 목록 자동 검색
+            //       (생성자에서 DB 조회를 하면 창이 뜨기 전에 멈춰 보이므로 Shown 시점에 비동기로 실행)
+            // [AI] 저장된 AI 모델을 먼저 불러온 뒤 Run 목록 검색
+            Shown += async (s, e) =>
+            {
+                LoadAiModelAtStartup();
+                await ReloadRunNodesFromSettingAsync();
+            };
         }
         // ── 응용 프로그램 아이콘 (H&iruja) ──
         private const string AppIconFileName = "iruja.ico";
 
-        // 폼 아이콘을 H&iruja 아이콘으로 설정합니다.
-        // 1) 어셈블리에 포함된 리소스(빌드 작업: 포함 리소스)  2) 실행 파일 폴더의 iruja.ico
-        // 3) 실행 파일 자체 아이콘 순서로 찾으며, 모두 실패하면 기본 아이콘을 유지합니다.
         private void ApplyAppIcon()
         {
             try
@@ -160,6 +177,124 @@ namespace Iruza
 
             return System.Drawing.Icon.ExtractAssociatedIcon(Application.ExecutablePath);
         }
+
+        // ── 파라미터 설정 로드 / 적용 ─────────────────────────────────
+        /// <summary>ParameterSetting.json 을 읽습니다. 실패하면 null 을 반환합니다.</summary>
+        private ParameterSetting TryLoadParameterSetting(out string error)
+        {
+            error = null;
+            try
+            {
+                return ParameterSetting.Load(ParameterFilePath);
+            }
+            catch (Exception ex)
+            {
+                error = ex.Message;
+                return null;
+            }
+        }
+
+        /// <summary>설정값을 MainShell 필드(레시피/스텝/파워/센서)에 반영합니다.</summary>
+        private void ApplyParameterSetting(ParameterSetting setting)
+        {
+            if (setting == null) return;
+
+            // 저장된 센서 선택값 복원
+            _sensorType = setting.Sensor ?? SensorType.None;
+            OnSensorTypeChanged(_sensorType);
+
+            // 값이 비어 있는 항목만 기본값으로 대체 (한 항목이 비었다고 전체를 초기화하지 않음)
+            _recipeName = setting.RecipeName ?? "";
+            _stepNum = setting.StepNum != null ? (short)setting.StepNum : (short)0;
+            _minPower = setting.MinPower != null ? (double)setting.MinPower : 0;
+            _maxPower = setting.MaxPower != null ? (double)setting.MaxPower : 0;
+        }
+
+        // ── Run 목록 검색 → 트리 노드 채우기 ─────────────────────────
+        /// <summary>
+        /// ParameterSetting.json 의 조건(레시피, 스텝, 파워 범위, 기간)으로 process_run 을 검색하여
+        /// 루트 하위 노드를 다시 채웁니다. ParameterForm "검색" 버튼과 동일한 조회입니다.
+        /// </summary>
+        private async Task ReloadRunNodesFromSettingAsync()
+        {
+            var setting = TryLoadParameterSetting(out string loadError);
+            if (setting == null)
+            {
+                FillRunNodes(new List<string>());
+                MessageBox.Show(
+                    "파라미터 설정 파일을 읽지 못했습니다.\n파일 → 파라미터 설정에서 조건을 지정해 주세요.\n\n" + loadError,
+                    "파라미터 설정", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                return;
+            }
+
+            ApplyParameterSetting(setting);
+
+            // [FIX] ParameterForm.TryGetSearchCondition 과 동일한 규칙으로 검색 조건 구성
+            //   - 비어 있는 Recipe / Step / Power 는 null(제한 없음)로 전달
+            //     (기존에는 ""·0 이 그대로 필터로 들어가 Max Power=0 등으로 결과가 줄어들었음)
+            //   - 기간이 없으면 ParameterForm 과 같이 최근 14일
+            string recipe = string.IsNullOrWhiteSpace(setting.RecipeName) ? null : setting.RecipeName.Trim();
+            short? step = (setting.StepNum.HasValue && setting.StepNum.Value > 0)
+                ? (short?)setting.StepNum.Value
+                : null;
+            decimal? minPower = setting.MinPower;
+            decimal? maxPower = setting.MaxPower;
+            DateTime startTime = setting.StartTime ?? DateTime.Now.AddDays(-14);
+            DateTime endTime = setting.EndTime ?? DateTime.Now;
+
+            List<string> runNames = new List<string>();
+            string dbError = null;
+
+            ShowLoading("Run 목록 불러오는 중...");
+            try
+            {
+                runNames = await Task.Run(() => new List<string>(
+                    MeasurementDb.SearchProcessRunNames(recipe, step, minPower, maxPower, startTime, endTime)));
+            }
+            catch (Exception ex)
+            {
+                dbError = ex.Message;
+            }
+            finally
+            {
+                HideLoading();
+            }
+
+            FillRunNodes(runNames);
+
+            if (dbError != null)
+            {
+                MessageBox.Show("PostgreSQL 연결 실패.\n\n" + dbError,
+                    "DB 연결", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            }
+        }
+
+        /// <summary>루트 하위 노드를 주어진 Run 이름으로 교체합니다. (UI 스레드에서 호출)</summary>
+        private void FillRunNodes(IEnumerable<string> runNames)
+        {
+            _tree.BeginUpdate();
+            try
+            {
+                _root.Checked = false;
+                _root.Nodes.Clear();
+
+                foreach (var runName in runNames)
+                    _root.Nodes.Add(new TreeNode(runName));
+
+                if (_root.Nodes.Count == 0)
+                    _root.Nodes.Add(new TreeNode(NoDataText));   // 개수 표시에서는 제외되어 (0)으로 표시
+
+                _root.Expand();
+                _tree.SelectedNode = _root.Nodes[0];
+            }
+            finally
+            {
+                _tree.EndUpdate();
+            }
+
+            _tree.Invalidate();   // 루트 개수 표시 갱신
+        }
+
         // ── 루트 하위 노드 개수 ──────────────────────────────────────
         /// <summary>"데이터 없음" placeholder를 제외한 실제 run 노드 수</summary>
         private int GetRunNodeCount()
@@ -183,7 +318,6 @@ namespace Iruza
             return count;
         }
 
-
         private void Tree_MouseDown(object sender, MouseEventArgs e)
         {
             TreeNode node = _tree.GetNodeAt(e.Location);
@@ -203,11 +337,8 @@ namespace Iruza
 
                     // root 노드를 체크/해제하면 모든 하위 노드에 동일하게 전파
                     if (node == _root)
-                    {
                         SetChildrenChecked(node, node.Checked);
-                    }
 
-                    // 전체 트리를 다시 그려서 하위 노드들  체크박스 + 루트 개수 표시까지 화면에 반영
                     _tree.Invalidate();
                 }
             }
@@ -217,7 +348,7 @@ namespace Iruza
             var tree = e.Node.TreeView;
             bool isSelected = (e.State & TreeNodeStates.Selected) != 0;
 
-            var labelBounds = e.Node.Bounds;   // ← 항상 안정적인 라벨 영역 (DrawMode 무관)
+            var labelBounds = e.Node.Bounds;
 
             // 1. 배경 채우기 (행 전체 폭)
             Color backColor = isSelected ? Color.FromArgb(255, 224, 130) : tree.BackColor;
@@ -252,7 +383,6 @@ namespace Iruza
                 int checkedCnt = GetCheckedRunNodeCount();
                 string countText = checkedCnt > 0 ? $"({checkedCnt}/{total})" : $"({total})";
 
-                // Node.Bounds는 원래 Text 폭 기준이므로, 라벨 텍스트 바로 뒤부터 행 끝까지 영역을 잡아 그림
                 Size textSize = TextRenderer.MeasureText(e.Graphics, e.Node.Text, font, Size.Empty, flags);
                 int countX = labelBounds.Left + textSize.Width;
                 var countBounds = new Rectangle(countX, labelBounds.Top,
@@ -262,31 +392,7 @@ namespace Iruza
                                       Color.FromArgb(0, 102, 204), flags | TextFormatFlags.EndEllipsis);
             }
 
-
             e.DrawDefault = false;
-        }
-
-        private void Tree_NodeMouseClick(object sender, TreeNodeMouseClickEventArgs e)
-        {
-            var checkBoxState = e.Node.Checked ? CheckBoxState.CheckedNormal : CheckBoxState.UncheckedNormal;
-            using (var g = _tree.CreateGraphics())
-            {
-                Size checkSize = CheckBoxRenderer.GetGlyphSize(g, checkBoxState);
-
-                // Tree_DrawNode와 동일한 계산식 사용 (일관성 유지)
-                int checkBoxX = e.Node.Bounds.Left - checkSize.Width - 3;
-                var checkArea = new Rectangle(checkBoxX, e.Node.Bounds.Top, checkSize.Width, e.Node.Bounds.Height);
-
-                if (checkArea.Contains(e.Location))
-                {
-                    e.Node.Checked = !e.Node.Checked;
-
-                    if (e.Node == _root)
-                        SetChildrenChecked(e.Node, e.Node.Checked);
-
-                    _tree.Invalidate();
-                }
-            }
         }
 
         private void EnableTreeViewDoubleBuffer(TreeView tree)
@@ -296,9 +402,6 @@ namespace Iruza
         }
 
         // ── 로딩 오버레이 (별도 스레드) ──────────────────────────────
-        // 메인 UI 스레드가 차트 렌더링 등으로 오래 블로킹되어도,
-        // LoadingOverlayForm은 자기만의 Application.Run 메시지 루프에서
-        // 돌아가기 때문에 Marquee 애니메이션이 멈추지 않는다.
         void ShowLoading(string message = "Loading...")
         {
             lock (_loadingLock)
@@ -309,8 +412,6 @@ namespace Iruza
                     return;
                 }
 
-                // 메인 폼 위에 겹칠 위치/크기를 UI 스레드에서 미리 계산해 넘겨준다
-                // (Rectangle은 값 타입이라 스레드 간 전달에 문제 없음)
                 var screenBounds = RectangleToScreen(ClientRectangle);
                 var ready = new ManualResetEvent(false);
 
@@ -359,10 +460,15 @@ namespace Iruza
         List<LoadedRunData> LoadCheckedRunData(List<string> checkedRunNames)
         {
             var result = new List<LoadedRunData>();
-            //var detector = new Demo();
-            // 현재 선택된 센서 (Input / Output) — 데이터 조회 조건에 필요하면 사용
-            var sensorType = _sensorType;
+            // 센서에 따라 조회할 채널 이름 결정 (None 은 Input 과 동일)
+            var channels = CurrentChannels();
+            string sourceChannel = channels[0];
+            string biasChannel = channels[1];
 
+            // [FIX] 기존에는 _ParaDlg 가 null 인 상태(프로그램 시작 직후)에서 Output 센서이면
+            //       _ParaDlg.getStepNum() 호출로 NullReferenceException 이 발생했음.
+            //       → ParameterForm 이 있으면 그 값을, 없으면 ParameterSetting.json 에서 읽은 필드 값을 사용
+            var paraDlg = _ParaDlg;
 
             foreach (var name in checkedRunNames)
             {
@@ -370,93 +476,46 @@ namespace Iruza
                 if (processRun == null)
                     continue;
 
-
-                if (_ParaDlg != null)
-                {
-                    var processSteps = MeasurementDb.GetProcessStepsByRunId(processRun.RunId, _ParaDlg.getStepNum());
-
-                    if(sensorType == SensorType.Input)
-                    {
-                        var sourceDataset = MeasurementDb.GetMeasurementDatasetByRunId(processRun.RunId, "source", _ParaDlg.getStepNum(), _ParaDlg.getPowerMin(), _ParaDlg.getPowerMax(), 50);
-                        var biasDataset = MeasurementDb.GetMeasurementDatasetByRunId(processRun.RunId, "bias", _ParaDlg.getStepNum(), _ParaDlg.getPowerMin(), _ParaDlg.getPowerMax(), 50);
-
-                        result.Add(new LoadedRunData
-                        {
-                            Name = name,
-                            SourceDataset = sourceDataset,
-                            BiasDataset = biasDataset,
-                        });
-                    }
-
-                    if (sensorType == SensorType.Output)
-                    {
-                        var sourceDataset = MeasurementDb.GetMeasurementDatasetByRunId(processRun.RunId, "source_out", _ParaDlg.getStepNum(), _ParaDlg.getPowerMin(), _ParaDlg.getPowerMax(), 50);
-                        var biasDataset = MeasurementDb.GetMeasurementDatasetByRunId(processRun.RunId, "bias_out", _ParaDlg.getStepNum(), _ParaDlg.getPowerMin(), _ParaDlg.getPowerMax(), 50);
-
-                        result.Add(new LoadedRunData
-                        {
-                            Name = name,
-                            SourceDataset = sourceDataset,
-                            BiasDataset = biasDataset,
-                        });
-                    }
-
-                }
+                Func<string, MeasurementDataset> load;
+                if (paraDlg != null)
+                    load = ch => MeasurementDb.GetMeasurementDatasetByRunId(processRun.RunId, ch,
+                                    paraDlg.getStepNum(), paraDlg.getPowerMin(), paraDlg.getPowerMax(), 50);
                 else
+                    load = ch => MeasurementDb.GetMeasurementDatasetByRunId(processRun.RunId, ch,
+                                    _stepNum, _minPower, _maxPower, 50);
+
+                var item = new LoadedRunData
                 {
+                    Name = name,
+                    SourceDataset = load(sourceChannel),
+                    BiasDataset = load(biasChannel),
+                    RecipeName = processRun.RecipeName,
+                    SourceChannel = sourceChannel,
+                    BiasChannel = biasChannel,
+                };
 
-                    if (sensorType == SensorType.Input)
-                    {
-                        var processSteps = MeasurementDb.GetProcessStepsByRunId(processRun.RunId, _stepNum);
-                        var sourceDataset = MeasurementDb.GetMeasurementDatasetByRunId(processRun.RunId, "source", _stepNum, _minPower, _maxPower, 50);
-                        var biasDataset = MeasurementDb.GetMeasurementDatasetByRunId(processRun.RunId, "bias", _stepNum, _minPower, _maxPower, 50);
-
-                        result.Add(new LoadedRunData
-                        {
-                            Name = name,
-                            SourceDataset = sourceDataset,
-                            BiasDataset = biasDataset,
-                        });
-                    }
-
-                    if (sensorType == SensorType.Output)
-                    {
-                        var sourceDataset = MeasurementDb.GetMeasurementDatasetByRunId(processRun.RunId, "source_out", _ParaDlg.getStepNum(), _ParaDlg.getPowerMin(), _ParaDlg.getPowerMax(), 50);
-                        var biasDataset = MeasurementDb.GetMeasurementDatasetByRunId(processRun.RunId, "bias_out", _ParaDlg.getStepNum(), _ParaDlg.getPowerMin(), _ParaDlg.getPowerMax(), 50);
-
-                        result.Add(new LoadedRunData
-                        {
-                            Name = name,
-                            SourceDataset = sourceDataset,
-                            BiasDataset = biasDataset,
-                        });
-                    }
-
-                    if (sensorType == SensorType.None)
-                    {
-                        //_sourceLabel.Text = "source(Input sensor)";
-                        //_biasLabel.Text = "bias(Input sensor)";
-
-                        var processSteps = MeasurementDb.GetProcessStepsByRunId(processRun.RunId, _stepNum);
-                        var sourceDataset = MeasurementDb.GetMeasurementDatasetByRunId(processRun.RunId, "source", _stepNum, _minPower, _maxPower, 50);
-                        var biasDataset = MeasurementDb.GetMeasurementDatasetByRunId(processRun.RunId, "bias", _stepNum, _minPower, _maxPower, 50);
-
-                        result.Add(new LoadedRunData
-                        {
-                            Name = name,
-                            SourceDataset = sourceDataset,
-                            BiasDataset = biasDataset,
-                        });
-                    }
+                // [AI] 모델이 있으면 백그라운드에서 함께 진단 (해당 채널 모델이 없으면 null)
+                //      AI 진단에 실패해도 측정 데이터 표시는 그대로 진행
+                try
+                {
+                    item.SourceAnomalies = _ai.Diagnose(item.RecipeName, sourceChannel, item.SourceDataset);
+                    item.BiasAnomalies = _ai.Diagnose(item.RecipeName, biasChannel, item.BiasDataset);
+                }
+                catch (Exception ex)
+                {
+                    System.Diagnostics.Debug.WriteLine("[AI] 진단 실패: " + ex.Message);
+                    item.SourceAnomalies = null;
+                    item.BiasAnomalies = null;
                 }
 
+                result.Add(item);
             }
 
             return result;
         }
+
         /// <summary>
         /// 센서 선택값이 확정되었을 때 호출됩니다.
-        /// Input / Output 에 따라 처리할 내용을 여기에 작성하세요.
         /// </summary>
         void OnSensorTypeChanged(SensorType sensorType)
         {
@@ -482,6 +541,201 @@ namespace Iruza
                     _biasLabel.Text = "bias(Input sensor)";
                     break;
             }
+
+            UpdateAiStatus();   // [AI] 센서가 바뀌면 해당 채널 모델 유무 표시 갱신
+        }
+
+        /// <summary>현재 센서의 (source, bias) 채널 이름 (None 은 Input 과 동일)</summary>
+        string[] CurrentChannels()
+        {
+            return _sensorType == SensorType.Output
+                ? new[] { "source_out", "bias_out" }
+                : new[] { "source", "bias" };
+        }
+
+        /// <summary>체크된 Run 이름 ("데이터 없음" placeholder 제외)</summary>
+        List<string> GetCheckedRunNames()
+        {
+            var names = new List<string>();
+            foreach (TreeNode node in _root.Nodes)
+                if (node.Checked && node.Text != NoDataText)
+                    names.Add(node.Text);
+            return names;
+        }
+
+        // ════════════════ [AI] 이상 진단 ════════════════
+
+        /// <summary>프로그램 시작 시 기본 위치의 모델을 불러옵니다. 파일이 없으면 조용히 넘어갑니다.</summary>
+        void LoadAiModelAtStartup()
+        {
+            string path = RfAnomalyService.DefaultModelPath;
+            if (File.Exists(path) && !_ai.TryLoad(path, out string error))
+            {
+                MessageBox.Show("AI 모델을 불러오지 못했습니다. AI 진단 없이 실행합니다.\n\n" + error,
+                    "AI 진단", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            }
+            UpdateAiStatus();
+        }
+
+        /// <summary>좌측 VIEW 버튼 위의 AI 모델 상태 표시</summary>
+        void UpdateAiStatus()
+        {
+            if (_aiStatusLabel == null) return;
+
+            var channels = CurrentChannels();
+            if (!_ai.IsLoaded)
+            {
+                _aiStatusLabel.Text = "AI 모델 없음\n(AI 진단 → Golden Run 학습)";
+                _aiStatusLabel.ForeColor = Color.DimGray;
+            }
+            else if (channels.All(_ai.HasChannel))
+            {
+                _aiStatusLabel.Text = "● AI 진단 ON\n" + _ai.ShortDescribe(channels[0]);
+                _aiStatusLabel.ForeColor = Color.SeaGreen;
+            }
+            else
+            {
+                string missing = string.Join(", ", channels.Where(c => !_ai.HasChannel(c)));
+                _aiStatusLabel.Text = $"AI 모델에 {missing} 없음\n(현재 센서로 다시 학습 필요)";
+                _aiStatusLabel.ForeColor = Color.DarkOrange;
+            }
+        }
+
+        /// <summary>체크한 Run을 Golden Run(정상)으로 간주해 현재 센서 채널의 모델을 학습·저장합니다.</summary>
+        async Task TrainAiModelAsync()
+        {
+            var golden = GetCheckedRunNames();
+            if (golden.Count < RfAnomalyService.MinGoldenRuns)
+            {
+                MessageBox.Show($"정상(Golden) Run을 트리에서 {RfAnomalyService.MinGoldenRuns}개 이상 체크해 주세요.\n(현재 {golden.Count}개)",
+                    "AI 모델 학습", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                return;
+            }
+
+            var channels = CurrentChannels();
+            string sensorText = IsOutputSensor ? "Output sensor" : "Input sensor";
+            var answer = MessageBox.Show(
+                $"체크한 {golden.Count}개 Run을 정상(Golden Run)으로 간주해\n" +
+                $"{sensorText} 채널({string.Join(", ", channels)}) AI 모델을 학습합니다.\n\n" +
+                "· 이상이 있었던 Run은 체크에서 빼 주세요 (소량 섞여도 강건 추정이 흡수합니다).\n" +
+                "· Heavy alarm 스텝은 자동으로 제외합니다.\n" +
+                "· 파라미터의 Step·Power 조건과 무관하게 각 Run의 전체 스텝을 학습합니다.\n\n" +
+                "계속할까요?",
+                "AI 모델 학습", MessageBoxButtons.YesNo, MessageBoxIcon.Question);
+            if (answer != DialogResult.Yes) return;
+
+            string report = null, error = null, saveError = null;
+            ShowLoading("AI 모델 학습 중... (Golden Run 조회 · MCD · Isolation Forest)");
+            try
+            {
+                report = await Task.Run(() =>
+                {
+                    string r = _ai.Train(golden, channels);
+                    try { _ai.Save(RfAnomalyService.DefaultModelPath); }
+                    catch (Exception ex) { saveError = ex.Message; }
+                    return r;
+                });
+            }
+            catch (Exception ex)
+            {
+                error = ex.Message;
+            }
+            finally
+            {
+                HideLoading();
+            }
+
+            UpdateAiStatus();
+
+            if (error != null)
+            {
+                MessageBox.Show("AI 모델 학습에 실패했습니다.\n\n" + error,
+                    "AI 모델 학습", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                return;
+            }
+
+            RediagnoseCurrentView(false);
+
+            string saveText = saveError == null
+                ? "저장 위치: " + RfAnomalyService.DefaultModelPath
+                : "※ 모델 파일 저장 실패 (이번 실행 중에만 사용됩니다): " + saveError;
+            MessageBox.Show("AI 모델 학습을 완료했습니다.\n\n" + report + "\n\n" + saveText,
+                "AI 모델 학습", MessageBoxButtons.OK, saveError == null ? MessageBoxIcon.Information : MessageBoxIcon.Warning);
+        }
+
+        /// <summary>현재 화면(VIEW로 불러온 Run)을 지금 모델로 다시 진단합니다.</summary>
+        void RediagnoseCurrentView(bool showMessage)
+        {
+            if (_lastLoadedRuns.Count == 0)
+            {
+                if (showMessage)
+                    MessageBox.Show("VIEW로 불러온 데이터가 없습니다.", "AI 진단", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                return;
+            }
+            if (!_ai.IsLoaded)
+            {
+                if (showMessage)
+                    MessageBox.Show("불러온 AI 모델이 없습니다.\nAI 진단 → Golden Run 학습 또는 모델 불러오기를 먼저 해 주세요.",
+                        "AI 진단", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                return;
+            }
+
+            Cursor = Cursors.WaitCursor;
+            try
+            {
+                foreach (var run in _lastLoadedRuns)
+                {
+                    run.SourceAnomalies = _ai.Diagnose(run.RecipeName, run.SourceChannel, run.SourceDataset);
+                    run.BiasAnomalies = _ai.Diagnose(run.RecipeName, run.BiasChannel, run.BiasDataset);
+                    _sourcePanel.SetAnomalyResults(run.SourceDataset, run.SourceAnomalies, refresh: false);
+                    _biasPanel.SetAnomalyResults(run.BiasDataset, run.BiasAnomalies, refresh: false);
+                }
+                _sourcePanel.RefreshView();
+                _biasPanel.RefreshView();
+            }
+            finally
+            {
+                Cursor = Cursors.Default;
+            }
+        }
+
+        /// <summary>다른 PC에서 학습한 모델 파일을 불러와 기본 위치에 복사합니다.</summary>
+        void LoadAiModelFromFile()
+        {
+            using (var dlg = new OpenFileDialog
+            {
+                Filter = "AI 모델 (*.json.gz)|*.json.gz|모든 파일|*.*",
+                InitialDirectory = Path.GetDirectoryName(RfAnomalyService.DefaultModelPath)
+            })
+            {
+                if (dlg.ShowDialog(this) != DialogResult.OK) return;
+
+                if (!_ai.TryLoad(dlg.FileName, out string error))
+                {
+                    MessageBox.Show("AI 모델을 불러오지 못했습니다.\n\n" + error,
+                        "AI 진단", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                    return;
+                }
+
+                // 다음 실행 때도 자동으로 쓰도록 기본 위치에 복사
+                string target = RfAnomalyService.DefaultModelPath;
+                if (!string.Equals(Path.GetFullPath(dlg.FileName), Path.GetFullPath(target), StringComparison.OrdinalIgnoreCase))
+                {
+                    try
+                    {
+                        Directory.CreateDirectory(Path.GetDirectoryName(target));
+                        File.Copy(dlg.FileName, target, true);
+                    }
+                    catch (Exception ex)
+                    {
+                        MessageBox.Show("모델은 불러왔지만 기본 위치로 복사하지 못했습니다.\n\n" + ex.Message,
+                            "AI 진단", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                    }
+                }
+
+                UpdateAiStatus();
+                RediagnoseCurrentView(false);
+            }
         }
 
 
@@ -498,9 +752,13 @@ namespace Iruza
 
                 _ParaDlg = new ParameterForm(_root, _recipeName, _stepNum, _minPower, _maxPower, _sensorType);
 
-                // 검색 버튼으로 닫힌 경우(DialogResult.OK)에만 센서 선택값 반영
+                // 검색 버튼으로 닫힌 경우(DialogResult.OK)에만 반영
                 if (_ParaDlg.ShowDialog(this) == DialogResult.OK)
                 {
+                    // [ADD] 검색 시 저장된 설정을 필드에도 반영 → 다음에 파라미터 창을 열 때 최신 값으로 표시
+                    var setting = TryLoadParameterSetting(out _);
+                    if (setting != null) ApplyParameterSetting(setting);
+
                     _sensorType = _ParaDlg.SelectedSensor;
                     OnSensorTypeChanged(_sensorType);
                 }
@@ -513,6 +771,15 @@ namespace Iruza
             mFile.DropDownItems.Add(new ToolStripSeparator());
             mFile.DropDownItems.Add("종료(&X)", null, (s, e) => Close());
 
+            // [AI] AI 진단 메뉴
+            var mAi = new ToolStripMenuItem("AI 진단(&A)");
+            mAi.DropDownItems.Add("Golden Run 학습 (체크한 Run 기준)...", null, async (s, e) => await TrainAiModelAsync());
+            mAi.DropDownItems.Add("현재 화면 다시 진단", null, (s, e) => RediagnoseCurrentView(true));
+            mAi.DropDownItems.Add(new ToolStripSeparator());
+            mAi.DropDownItems.Add("모델 불러오기...", null, (s, e) => LoadAiModelFromFile());
+            mAi.DropDownItems.Add("모델 정보", null, (s, e) =>
+                MessageBox.Show(_ai.Describe(), "AI 모델 정보", MessageBoxButtons.OK, MessageBoxIcon.Information));
+
             var mHelp = new ToolStripMenuItem("도움말(&H)");
             mHelp.DropDownItems.Add("버전 정보", null, (s, e) =>
                 MessageBox.Show(
@@ -520,6 +787,7 @@ namespace Iruza
                     "버전 정보", MessageBoxButtons.OK, MessageBoxIcon.Information));
 
             menu.Items.Add(mFile);
+            menu.Items.Add(mAi);   // [AI]
             menu.Items.Add(mHelp);
             MainMenuStrip = menu;
             Controls.Add(menu);
@@ -602,60 +870,18 @@ namespace Iruza
                     _tree.SelectedNode = root.Nodes[_tabs.SelectedIndex];
             };
 
-            Controls.Add(_tabs);   // [FIX] Dock=Fill → 가장 먼저 추가
+            Controls.Add(_tabs);   // Dock=Fill → 가장 먼저 추가
         }
 
-        // ── 좌측 트리(그리드 트리) 메뉴 (Dock.Left 이므로 탭 다음에 Controls 에 추가) ──
+        // ── 좌측 트리 메뉴 (Dock.Left 이므로 탭 다음에 Controls 에 추가) ──
         void BuildTree()
         {
 
             _root = new TreeNode("Smith Chart");
 
-            // PostgreSQL의 process_run 데이터를 트리 노드로 로드
-            try
-            {
-                var parameterPath = Path.Combine(Application.StartupPath, "Parameter", "ParameterSetting.json");
-                var parameterSetting = ParameterSetting.Load(parameterPath);
-
-                var startTime = parameterSetting.StartTime;
-                var endTime = parameterSetting.EndTime;
-                // 저장된 센서 선택값 복원
-                _sensorType = parameterSetting.Sensor ?? SensorType.None;
-                OnSensorTypeChanged(_sensorType);
-
-                if (parameterSetting.StepNum == null || parameterSetting.MinPower == null || parameterSetting.MaxPower == null || parameterSetting.RecipeName == null)
-                {
-                    _recipeName = "";
-                    _stepNum = 0;
-                    _minPower = 0;
-                    _maxPower = 0;
-
-                }
-                else
-                {
-                    _stepNum = (short)parameterSetting.StepNum;
-                    _minPower = (double)parameterSetting.MinPower;
-                    _maxPower = (double)parameterSetting.MaxPower;
-                    _recipeName = parameterSetting.RecipeName;
-                }
-
-                foreach (var runName in MeasurementDb.SearchProcessRunNames(_recipeName, _stepNum, (Decimal)_minPower, (Decimal)_maxPower, startTime, endTime))
-                    _root.Nodes.Add(new TreeNode(runName));
-
-            }
-            catch (Exception ex)
-            {
-
-
-                MessageBox.Show(
-                    "PostgreSQL 연결 실패. 샘플 데이터로 표시합니다.\n\n" + ex.Message,
-                    "DB 연결",
-                    MessageBoxButtons.OK,
-                    MessageBoxIcon.Warning);
-            }
-
-            if (_root.Nodes.Count == 0)
-                _root.Nodes.Add(new TreeNode(NoDataText));   // 개수 표시에서는 제외되어 (0)으로 표시
+            // [CHANGE] Run 목록은 폼이 표시된 뒤(Shown) ReloadRunNodesFromSettingAsync()에서 채움.
+            //          여기서는 placeholder 만 넣어 둠.
+            _root.Nodes.Add(new TreeNode(NoDataText));
             _tree.Nodes.Add(_root);
             _root.Expand();
             _tree.SelectedNode = _root.Nodes[0];
@@ -683,10 +909,8 @@ namespace Iruza
                 RowCount = 1
             };
             bottomButtonPanel.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100F));
-            //bottomButtonPanel.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 50F));
 
-            // [ADD] 트리 밑에 붙일 VIEW 버튼
-            var btnSearch = new Button
+             var btnSearch = new Button
             {
                 Text = "VIEW",
                 Dock = DockStyle.Fill,
@@ -694,17 +918,8 @@ namespace Iruza
             };
             btnSearch.Click += async (s, e) =>
             {
-                var checkedRunNames = new List<string>();
-
-                // string name = node.Text;
-
-                foreach (TreeNode node in _root.Nodes)
-                {
-                    // "데이터 없음" placeholder는 DB 조회 대상에서 제외
-                    if (node.Checked && node.Text != NoDataText)
-                        checkedRunNames.Add(node.Text);
-
-                }
+                // "데이터 없음" placeholder는 DB 조회 대상에서 제외
+                var checkedRunNames = GetCheckedRunNames();
 
                 if (checkedRunNames.Count == 0)
                 {
@@ -713,6 +928,7 @@ namespace Iruza
 
                     _sourcePanel.RemoveAllDatasets();
                     _biasPanel.RemoveAllDatasets();
+                    _lastLoadedRuns = new List<LoadedRunData>();   // [AI]
                     return;
                 }
 
@@ -728,10 +944,11 @@ namespace Iruza
 
                     foreach (var run in loadedRuns)
                     {
-
-                        _sourcePanel.OverlappedChartDisplay(0, _root, run.Name, run.SourceDataset);
-                        _biasPanel.OverlappedChartDisplay(1, _root, run.Name, run.BiasDataset);
+                        // [AI] 진단 결과를 함께 전달 → 스미스차트 경고 표시 · 테이블 AI 컬럼
+                        _sourcePanel.OverlappedChartDisplay(0, _root, run.Name, run.SourceDataset, run.SourceAnomalies);
+                        _biasPanel.OverlappedChartDisplay(1, _root, run.Name, run.BiasDataset, run.BiasAnomalies);
                     }
+                    _lastLoadedRuns = loadedRuns;   // [AI] 재진단용
                 }
                 catch (Exception ex)
                 {
@@ -748,11 +965,24 @@ namespace Iruza
 
             bottomButtonPanel.Controls.Add(btnSearch, 0, 0);
 
+            // [AI] AI 모델 상태 (VIEW 버튼 바로 위)
+            _aiStatusLabel = new Label
+            {
+                Dock = DockStyle.Bottom,
+                Height = 38,
+                Font = new Font("Malgun Gothic", 8.5f),
+                TextAlign = ContentAlignment.MiddleLeft,
+                Padding = new Padding(4, 0, 0, 0),
+                BackColor = Color.FromArgb(240, 244, 248),
+                Text = "AI 모델 확인 중..."
+            };
+
+            // Dock 순서: Fill(tree) → Bottom(AI 상태) → Bottom(버튼, 맨 아래)
             _leftPanel.Controls.Add(_tree);
+            _leftPanel.Controls.Add(_aiStatusLabel);
             _leftPanel.Controls.Add(bottomButtonPanel);
 
-            Controls.Add(_leftPanel);   // [FIX] Dock=Left → _tabs(Fill) 다음에 추가해야
-                                        // 탭 영역이 이 폭만큼 정상적으로 밀려남
+            Controls.Add(_leftPanel);   // Dock=Left → _tabs(Fill) 다음에 추가
         }
 
         /// <summary>
@@ -767,16 +997,9 @@ namespace Iruza
             _isCheckPropagating = true;
             try
             {
-                // Root 노드를 체크/해제했을 때만 하위 노드 전체에 전파
                 if (e.Node == _root)
-                {
                     SetChildrenChecked(e.Node, e.Node.Checked);
-                    _tree.Invalidate();          // ← 전체 트리 다시 그리기
-                }
-                else
-                {
-                    _tree.Invalidate();          // ← 루트의 체크 개수 표시도 갱신해야 하므로 전체 
-                }
+                _tree.Invalidate();
             }
             finally
             {
@@ -814,14 +1037,10 @@ namespace Iruza
 
         private void InitializeComponent()
         {
-            this.SuspendLayout();
-            // 
-            // MainShell
-            // 
+            this.SuspendLayout();     
             this.ClientSize = new System.Drawing.Size(886, 548);
             this.Name = "MainShell";
             this.ResumeLayout(false);
-
         }
     }
 }
